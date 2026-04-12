@@ -1,0 +1,98 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: ai-platform-test
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/ai_platform_test?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true
+    username: root
+    password: root123
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      idle-timeout: 60000
+      connection-timeout: 20000
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      database: 1
+      lettuce:
+        pool:
+          max-active: 4
+          max-idle: 2
+          min-idle: 0
+          max-wait: 5000ms
+
+  elasticsearch:
+    uris: http://localhost:9200
+
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+elasticsearch:
+  index-prefix: kb_test_
+  vector-dimension: 768
+  shards: 1
+  replicas: 0
+
+minio:
+  endpoint: http://localhost:9000
+  access-key: minioadmin
+  secret-key: minioadmin123
+  bucket-name: ai-platform-test
+  secure: false
+
+jwt:
+  secret: TestSecretKeyForJWTTokenGenerationMustBeLongEnough2024
+  expiration: 86400000
+  header: Authorization
+  prefix: Bearer
+
+# 跨域配置
+cors:
+  allow-all-origins: true
+  allowed-origins: "*"
+
+ai:
+  embedding:
+    model: text2vec-base-chinese
+    dimension: 768
+  llm:
+    api-url: http://localhost:8000/v1/chat/completions
+    api-key: test-key
+    model: qwen2.5-7b-instruct
+    timeout: 30000
+
+logging:
+  level:
+    com.aip: debug
+    org.springframework: debug
+
+# OpenAPI 配置
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+
+# 自定义应用配置
+aip:
+  server:
+    url: http://localhost:8080

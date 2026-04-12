@@ -1,0 +1,819 @@
+/* ============================================
+   AI 能力中台 - 全局样式重置与工具类
+   主题：清新专业（Light Professional）
+   ============================================ */
+
+// ------------------------------------------------
+// 1. CSS 重置与基础设置
+// ------------------------------------------------
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html {
+  font-size: 14px;
+  scroll-behavior: smooth;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  font-family: $font-family-base;
+  font-size: $font-size-base;
+  line-height: $line-height-normal;
+  color: $gray-700;
+  background-color: $gray-100;
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+}
+
+// ------------------------------------------------
+// 2. 文字排版
+// ------------------------------------------------
+.text-gradient {
+  background: linear-gradient(135deg, $primary-color, $info-color);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.text-primary { color: $primary-color; }
+.text-success { color: $success-color; }
+.text-warning { color: $warning-color; }
+.text-danger { color: $danger-color; }
+.text-muted { color: $gray-500; }
+
+// ------------------------------------------------
+// 3. 滚动条美化（亮色主题）
+// ------------------------------------------------
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: $gray-100;
+}
+
+::-webkit-scrollbar-thumb {
+  background: $gray-300;
+  border-radius: 4px;
+
+  &:hover {
+    background: $gray-400;
+  }
+}
+
+// Firefox 滚动条
+* {
+  scrollbar-width: thin;
+  scrollbar-color: $gray-300 $gray-100;
+}
+
+// ------------------------------------------------
+// 4. 通用间距工具类
+// ------------------------------------------------
+.m-0 { margin: 0; }
+.p-0 { padding: 0; }
+
+.mt-4 { margin-top: 4px; }
+.mt-8 { margin-top: 8px; }
+.mt-10 { margin-top: 10px; }
+.mt-12 { margin-top: 12px; }
+.mt-16 { margin-top: 16px; }
+.mt-20 { margin-top: 20px; }
+.mt-24 { margin-top: 24px; }
+
+.mb-4 { margin-bottom: 4px; }
+.mb-8 { margin-bottom: 8px; }
+.mb-10 { margin-bottom: 10px; }
+.mb-12 { margin-bottom: 12px; }
+.mb-16 { margin-bottom: 16px; }
+.mb-20 { margin-bottom: 20px; }
+.mb-24 { margin-bottom: 24px; }
+
+.ml-4 { margin-left: 4px; }
+.ml-8 { margin-left: 8px; }
+.ml-10 { margin-left: 10px; }
+.ml-12 { margin-left: 12px; }
+.ml-16 { margin-left: 16px; }
+
+.mr-4 { margin-right: 4px; }
+.mr-8 { margin-right: 8px; }
+.mr-10 { margin-right: 10px; }
+.mr-12 { margin-right: 12px; }
+.mr-16 { margin-right: 16px; }
+
+.p-4 { padding: 4px; }
+.p-8 { padding: 8px; }
+.p-12 { padding: 12px; }
+.p-16 { padding: 16px; }
+.p-20 { padding: 20px; }
+.p-24 { padding: 24px; }
+
+// ------------------------------------------------
+// 5. 文本对齐
+// ------------------------------------------------
+.text-left { text-align: left; }
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+
+// ------------------------------------------------
+// 6. Flex 布局工具类
+// ------------------------------------------------
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.flex-wrap { flex-wrap: wrap; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.items-end { align-items: flex-end; }
+.justify-center { justify-content: center; }
+.justify-between { justify-content: space-between; }
+.justify-end { justify-content: flex-end; }
+.flex-1 { flex: 1; }
+.flex-shrink-0 { flex-shrink: 0; }
+
+// ------------------------------------------------
+// 7. 网格布局工具类
+// ------------------------------------------------
+.grid { display: grid; }
+.grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
+.gap-4 { gap: 4px; }
+.gap-8 { gap: 8px; }
+.gap-12 { gap: 12px; }
+.gap-16 { gap: 16px; }
+.gap-20 { gap: 20px; }
+.gap-24 { gap: 24px; }
+
+// ------------------------------------------------
+// 8. 圆角与边框
+// ------------------------------------------------
+.rounded { border-radius: $radius-md; }
+.rounded-sm { border-radius: $radius-sm; }
+.rounded-lg { border-radius: $radius-lg; }
+.rounded-xl { border-radius: $radius-xl; }
+.rounded-full { border-radius: $radius-full; }
+
+// ------------------------------------------------
+// 9. 卡片样式（亮色主题）
+// ------------------------------------------------
+.card {
+  background: $gray-50;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: $radius-lg;
+  box-shadow: $shadow-sm;
+  transition: all $transition-base;
+
+  &:hover {
+    box-shadow: $shadow-md;
+  }
+}
+
+// ------------------------------------------------
+// 10. 动画工具类
+// ------------------------------------------------
+
+// 淡入
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+// 脉冲发光
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 5px $primary-glow;
+  }
+  50% {
+    box-shadow: 0 0 15px $primary-glow;
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+// 浮动动画
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+// 打字机光标
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.cursor-blink {
+  animation: blink 1s step-end infinite;
+}
+
+// 旋转加载
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+// ------------------------------------------------
+// 11. 页面过渡动画
+// ------------------------------------------------
+.page-enter-active,
+.page-leave-active {
+  transition: all $transition-base;
+}
+
+.page-enter-from {
+  opacity: 0;
+  transform: translateX(10px);
+}
+
+.page-leave-to {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+
+// 滑入动画（用于列表项）
+.slide-enter-active {
+  transition: all $transition-slow;
+}
+
+.slide-leave-active {
+  transition: all $transition-base;
+}
+
+.slide-enter-from {
+  opacity: 0;
+  transform: translateY(20px);
+}
+
+.slide-leave-to {
+  opacity: 0;
+  transform: translateX(20px);
+}
+
+// ------------------------------------------------
+// 12. Element Plus 覆盖样式（亮色主题）
+// ------------------------------------------------
+
+// 按钮
+.el-button {
+  font-weight: 500;
+  border-radius: $radius-md;
+  transition: all $transition-fast;
+
+  &--primary {
+    background: linear-gradient(135deg, $primary-color, $primary-dark);
+    border: none;
+    color: #fff;
+
+    &:hover {
+      background: linear-gradient(135deg, $primary-light, $primary-color);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px $primary-glow;
+    }
+
+    &:active {
+      transform: translateY(0);
+    }
+  }
+
+  &--default {
+    background: $gray-50;
+    border-color: $gray-300;
+    color: $gray-700;
+
+    &:hover {
+      border-color: $primary-color;
+      color: $primary-color;
+    }
+  }
+
+  &--text {
+    color: $gray-600;
+
+    &:hover {
+      color: $primary-color;
+    }
+  }
+}
+
+// 输入框（亮色主题）
+.el-input__wrapper {
+  background-color: $gray-50 !important;
+  border: 1px solid $gray-300 !important;
+  border-radius: $radius-md !important;
+  box-shadow: none !important;
+  transition: all $transition-fast;
+
+  &:hover {
+    border-color: $gray-400;
+  }
+
+  &.is-focus {
+    border-color: $primary-color !important;
+    box-shadow: 0 0 0 3px rgba($primary-color, 0.15) !important;
+  }
+}
+
+.el-input__inner {
+  color: $gray-800;
+
+  &::placeholder {
+    color: $gray-400;
+  }
+}
+
+.el-input__prefix {
+  color: $gray-400;
+}
+
+// 选择器
+.el-select {
+  .el-input__wrapper {
+    background-color: $gray-50 !important;
+  }
+}
+
+.el-select-dropdown {
+  background: $gray-50;
+  border: 1px solid $gray-200;
+  box-shadow: $shadow-lg;
+
+  .el-select-dropdown__item {
+    color: $gray-700;
+
+    &:hover,
+    &.hover {
+      background: $gray-100;
+    }
+
+    &.selected {
+      color: $primary-color;
+      font-weight: 600;
+    }
+  }
+}
+
+// 表单项
+.el-form-item__label {
+  color: $gray-600;
+  font-weight: 500;
+}
+
+// 表单验证
+.el-form-item__error {
+  color: $danger-color;
+}
+
+// 表格（亮色主题）
+.el-table {
+  --el-table-bg-color: #{$gray-50};
+  --el-table-tr-bg-color: #{$gray-50};
+  --el-table-header-bg-color: #{$gray-100};
+  --el-table-row-hover-bg-color: #{$gray-50};
+  --el-table-border-color: #{$gray-200};
+  --el-table-text-color: #{$gray-700};
+  --el-table-header-text-color: #{$gray-800};
+
+  border-radius: $radius-lg;
+  overflow: hidden;
+  font-size: $font-size-sm;
+
+  // 表头
+  th.el-table__cell {
+    font-weight: 600;
+    font-size: $font-size-sm;
+    background-color: $gray-100 !important;
+    color: $gray-800;
+    border-bottom: 1px solid $gray-300 !important;
+    padding: 12px 16px;
+  }
+
+  td.el-table__cell {
+    border-bottom: 1px solid $gray-200 !important;
+    padding: 12px 16px;
+    color: $gray-700;
+  }
+
+  tr:hover > td.el-table__cell {
+    background-color: rgba($primary-color, 0.04) !important;
+  }
+
+  // 斑马纹
+  &.el-table--striped {
+    .el-table__body tr.el-table__row--striped > td.el-table__cell {
+      background: $gray-50;
+    }
+  }
+
+  // 边框模式
+  &.el-table--border {
+    border: 1px solid $gray-200;
+
+    th.el-table__cell,
+    td.el-table__cell {
+      border-right: 1px solid $gray-200 !important;
+    }
+  }
+
+  // 排序图标
+  .sort-caret {
+    border-color: transparent;
+
+    &.ascending {
+      border-bottom-color: $gray-400;
+    }
+
+    &.descending {
+      border-top-color: $gray-400;
+    }
+  }
+
+  .ascending .sort-caret.ascending {
+    border-bottom-color: $primary-color;
+  }
+
+  .descending .sort-caret.descending {
+    border-top-color: $primary-color;
+  }
+
+  // 空状态
+  .el-table__empty-text {
+    color: $gray-400;
+  }
+}
+
+// 表格列固定
+.el-table__fixed,
+.el-table__fixed-right {
+  background: $gray-50;
+}
+
+// 对话框（亮色主题）
+.el-dialog {
+  --el-dialog-bg-color: #{$gray-50};
+  --el-dialog-title-font-size: #{$font-size-lg};
+  border-radius: $radius-xl !important;
+  border: 1px solid $gray-200;
+  box-shadow: $shadow-xl;
+
+  .el-dialog__header {
+    border-bottom: 1px solid $gray-200;
+    padding: 20px 24px;
+
+    .el-dialog__title {
+      color: $gray-800;
+      font-weight: 600;
+    }
+  }
+
+  .el-dialog__body {
+    padding: 24px;
+    color: $gray-700;
+  }
+
+  .el-dialog__footer {
+    border-top: 1px solid $gray-200;
+    padding: 16px 24px;
+  }
+}
+
+// 遮罩层
+.el-overlay-dialog {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+// 下拉菜单（亮色主题）
+.el-dropdown-menu {
+  background-color: $gray-50;
+  border: 1px solid $gray-200;
+  border-radius: $radius-md;
+  box-shadow: $shadow-lg;
+  padding: 6px;
+
+  .el-dropdown-menu__item {
+    color: $gray-700;
+    border-radius: $radius-sm;
+    padding: 8px 12px;
+
+    &:hover {
+      background-color: rgba($primary-color, 0.08);
+      color: $primary-color;
+    }
+
+    &.divided {
+      border-top: 1px solid $gray-200;
+    }
+  }
+}
+
+// 消息提示（亮色主题）
+.el-message {
+  --el-message-bg-color: #{$gray-50};
+  --el-message-border-color: #{$gray-200};
+  border: 1px solid $gray-200;
+  border-radius: $radius-md;
+  box-shadow: $shadow-lg;
+
+  .el-message__content {
+    color: $gray-700;
+  }
+}
+
+// 标签页（亮色主题）
+.el-tabs {
+  .el-tabs__header {
+    margin-bottom: 16px;
+  }
+
+  .el-tabs__nav-wrap::after {
+    background-color: $gray-200;
+    height: 1px;
+  }
+
+  .el-tabs__item {
+    color: $gray-500;
+    font-size: $font-size-base;
+    font-weight: 500;
+
+    &:hover {
+      color: $gray-700;
+    }
+
+    &.is-active {
+      color: $primary-color;
+      font-weight: 600;
+    }
+  }
+
+  .el-tabs__active-bar {
+    background-color: $primary-color;
+    height: 2px;
+  }
+}
+
+// 分页（亮色主题）
+.el-pagination {
+  --el-pagination-bg-color: #{$gray-50};
+  --el-pagination-button-bg-color: #{$gray-100};
+  --el-pagination-hover-color: #{$primary-color};
+  --el-pagination-text-color: #{$gray-600};
+
+  .btn-prev,
+  .btn-next {
+    background: $gray-100;
+    border-radius: $radius-md;
+
+    &:hover {
+      color: $primary-color;
+    }
+  }
+
+  .el-pager li {
+    background: $gray-100;
+    border-radius: $radius-md;
+    color: $gray-600;
+    font-weight: 500;
+
+    &:hover {
+      color: $primary-color;
+    }
+
+    &.is-active {
+      background: $primary-color;
+      color: #fff;
+    }
+  }
+}
+
+// 卡片（亮色主题）
+.el-card {
+  --el-card-bg-color: #{$gray-50};
+  border: 1px solid $gray-200;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-sm;
+
+  .el-card__header {
+    border-bottom: 1px solid $gray-200;
+    padding: 16px 20px;
+    color: $gray-800;
+    font-weight: 600;
+  }
+
+  .el-card__body {
+    padding: 20px;
+  }
+}
+
+// 标签（亮色主题）
+.el-tag {
+  border-radius: $radius-full;
+  border: none;
+
+  &--primary {
+    background: rgba($primary-color, 0.1);
+    color: $primary-color;
+  }
+
+  &--success {
+    background: rgba($success-color, 0.1);
+    color: $success-color;
+  }
+
+  &--warning {
+    background: rgba($warning-color, 0.1);
+    color: $warning-color;
+  }
+
+  &--danger {
+    background: rgba($danger-color, 0.1);
+    color: $danger-color;
+  }
+
+  &--info {
+    background: $gray-100;
+    color: $gray-600;
+  }
+}
+
+// 徽章
+.el-badge__content {
+  border: none;
+}
+
+// 分割线
+.el-divider {
+  --el-divider-bg-color: #{$gray-200};
+}
+
+// 空状态
+.el-empty__description {
+  color: $gray-400;
+}
+
+// 加载动画（亮色主题）
+.el-loading-mask {
+  background-color: rgba(255, 255, 255, 0.9);
+}
+
+.el-loading-spinner {
+  .circular {
+    .path {
+      stroke: $primary-color;
+    }
+  }
+
+  .el-loading-text {
+    color: $gray-500;
+  }
+}
+
+// 弹出框 / Tooltip（亮色主题）
+.el-popover {
+  --el-popover-bg-color: #{$gray-50};
+  border: 1px solid $gray-200;
+  box-shadow: $shadow-lg;
+}
+
+.el-tooltip__popper {
+  background: $gray-800 !important;
+  border: none;
+
+  .el-tooltip__arrow::before {
+    background: $gray-800;
+  }
+}
+
+// 开关（亮色主题）
+.el-switch {
+  --el-switch-off-color: #{$gray-300};
+
+  &.is-checked {
+    --el-switch-on-color: #{$primary-color};
+  }
+}
+
+// 复选框（亮色主题）
+.el-checkbox__input.is-checked {
+  .el-checkbox__inner {
+    background-color: $primary-color;
+    border-color: $primary-color;
+  }
+}
+
+.el-checkbox__inner:hover {
+  border-color: $primary-color;
+}
+
+// 单选框（亮色主题）
+.el-radio__input.is-checked {
+  .el-radio__inner {
+    background-color: $primary-color;
+    border-color: $primary-color;
+  }
+}
+
+.el-radio__inner:hover {
+  border-color: $primary-color;
+}
+
+// 日期选择器（亮色主题）
+.el-date-editor {
+  .el-input__wrapper {
+    background-color: $gray-50 !important;
+  }
+}
+
+.el-date-picker {
+  --el-datepicker-bg-color: #{$gray-50};
+  --el-datepicker-border-color: #{$gray-200};
+
+  .el-date-table th {
+    color: $gray-500;
+  }
+
+  .el-date-table td.available:hover {
+    background: rgba($primary-color, 0.08);
+  }
+
+  .el-date-table td.current:not(.disabled) .el-date-table-cell__text {
+    background: $primary-color;
+  }
+}
+
+// 颜色选择器
+.el-color-picker__trigger {
+  border: 1px solid $gray-300;
+}
+
+// 滑块
+.el-slider__runway {
+  background: $gray-200;
+}
+
+.el-slider__bar {
+  background: $primary-color;
+}
+
+.el-slider__button {
+  border-color: $primary-color;
+}
+
+// 进度条
+.el-progress-bar__outer {
+  background: $gray-200;
+}
+
+// 骨架屏
+.el-skeleton {
+  .el-skeleton__item {
+    background: linear-gradient(90deg, $gray-100 25%, $gray-200 50%, $gray-100 75%);
+    background-size: 400% 100%;
+    animation: skeleton-loading 1.5s ease-in-out infinite;
+  }
+}
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}

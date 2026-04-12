@@ -1,0 +1,111 @@
+server:
+  port: 8080
+  # 全局接口前缀配置（所有Controller自动加上此前缀）
+  servlet:
+    context-path: /api
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+
+spring:
+  application:
+    name: ai-platform
+  main:
+    banner-mode: off
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/ai_platform?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true
+    username: root
+    password: root123
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 30000
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+        # 物理命名策略：自定义（表/字段添加前缀 + 驼峰转下划线）
+        physical_naming_strategy: com.aip.common.config.CustomPhysicalNamingStrategy
+        # Instant 类型存储为 BIGINT 毫秒时间戳（而非 TIMESTAMP）
+        jdbc:
+          time_zone: Asia/Shanghai
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      database: 0
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
+
+  elasticsearch:
+    uris: http://localhost:9200
+
+elasticsearch:
+  index-prefix: kb_
+  vector-dimension: 768
+  shards: 1
+  replicas: 0
+
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+
+minio:
+  endpoint: http://localhost:9000
+  access-key: minioadmin
+  secret-key: minioadmin123
+  bucket-name: ai-platform
+  secure: false
+
+jwt:
+  secret: ${JWT_SECRET:AiPlatformSecretKey2024ForJWTTokenGenerationMustBeLongEnough}
+  expiration: 3600000  # 1小时（3600000毫秒），实际用于业务滑动过期
+  header: Authorization
+  prefix: Bearer
+
+# 跨域配置
+cors:
+  allow-all-origins: false
+  allowed-origins: http://localhost:3000,http://localhost:8080
+
+ai:
+  embedding:
+    model: text2vec-base-chinese
+    dimension: 768
+    api-url: http://localhost:8001
+  chat:
+    # 默认知识库编码（客服知识库）
+    default-knowledge-base-code: customer-service
+    # 最小匹配分数阈值
+    min-match-score: 5
+    # 向量匹配结果数
+    vector-match-topk: 10
+    # 知识库检索结果数
+    search-topk: 5
+
+logging:
+  level:
+    com.aip: debug
+    org.springframework: info
