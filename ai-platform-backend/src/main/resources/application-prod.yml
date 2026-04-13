@@ -54,7 +54,7 @@ spring:
 
 elasticsearch:
   index-prefix: kb_
-  vector-dimension: 768
+  vector-dimension: 1024
   shards: 3
   replicas: 1
 
@@ -78,8 +78,8 @@ cors:
 
 ai:
   embedding:
-    model: ${AI_EMBEDDING_MODEL:text2vec-base-chinese}
-    dimension: 768
+    model: ${AI_EMBEDDING_MODEL:text-embedding-v4}
+    dimension: 1024
   llm:
     api-url: ${AI_LLM_API_URL:http://localhost:8000/v1/chat/completions}
     api-key: ${AI_LLM_API_KEY}

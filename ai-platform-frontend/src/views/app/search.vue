@@ -20,6 +20,10 @@
           @change="handleKbChange"
         >
           <el-option
+            :label="'所有知识库'"
+            :value="ALL_KB_ID"
+          />
+          <el-option
             v-for="kb in knowledgeBases"
             :key="kb.id"
             :label="kb.name"
@@ -31,6 +35,10 @@
             </div>
           </el-option>
         </el-select>
+        <div class="scope-tip">
+          <el-tag size="mini" type="success">当前范围：{{ searchScopeLabel }}</el-tag>
+          <span>未选择或选择“所有知识库”即在全部知识库中搜索</span>
+        </div>
       </div>
 
       <!-- 搜索类型 -->
@@ -189,7 +197,7 @@
         <div class="hint-content">
           <el-icon class="hint-icon"><MagicStick /></el-icon>
           <h3>开始智能检索</h3>
-          <p>选择知识库并输入关键词，系统将为您查找相关知识内容</p>
+          <p>知识库选择可选，留空或选择“所有知识库”时会覆盖所有内容</p>
           <div class="hint-features">
             <div class="feature-item">
               <el-icon><Check /></el-icon>
@@ -300,7 +308,8 @@ import request from '@/utils/request'
 
 // 状态
 const searchQuery = ref('')
-const selectedKbId = ref('')
+const ALL_KB_ID = 'all'
+const selectedKbId = ref(ALL_KB_ID)
 const searchType = ref('hybrid')
 const loading = ref(false)
 const hasSearched = ref(false)
@@ -315,8 +324,15 @@ const searchResult = reactive({
   page: 1,
   pageSize: 10
 })
+const searchScopeLabel = computed(() => {
+  if (selectedKbId.value === ALL_KB_ID) {
+    return '所有知识库'
+  }
+  const kb = knowledgeBases.value.find(kb => kb.id === selectedKbId.value)
+  return kb ? kb.name : '所有知识库'
+})
 
-// 详情抽屉
+
 const detailDrawerVisible = ref(false)
 const currentDetail = ref(null)
 
@@ -332,7 +348,7 @@ const dialogWidth = computed(() => {
 // 加载知识库列表
 async function loadKnowledgeBases() {
   try {
-    const res = await request.get('/api/knowledge/bases')
+    const res = await request.get('/knowledge/bases')
     if (res.data.code === 200) {
       knowledgeBases.value = res.data.data || []
     }
@@ -355,13 +371,13 @@ async function handleSearch() {
   const startTime = Date.now()
 
   try {
-    const res = await request.post('/api/knowledge/search', {
+    const res = await request.post('/knowledge/search', {
       keyword: searchQuery.value,
-      kbId: selectedKbId.value || null,
       searchType: searchType.value,
       topK: 50,
       page: 1,
-      pageSize: pageSize.value
+      pageSize: pageSize.value,
+      ...(selectedKbId.value && selectedKbId.value !== ALL_KB_ID ? { kbId: selectedKbId.value } : {})
     })
 
     searchTime.value = Date.now() - startTime
@@ -372,6 +388,8 @@ async function handleSearch() {
       searchResult.total = data.total || 0
       searchResult.page = data.page || 1
       searchResult.pageSize = data.pageSize || 10
+      // 滚动到顶部
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     }
   } catch (error) {
     console.error('搜索失败:', error)
@@ -389,20 +407,21 @@ async function handlePageChange(page) {
   currentPage.value = page
 
   try {
-    const res = await request.post('/api/knowledge/search', {
+    const res = await request.post('/knowledge/search', {
       keyword: searchQuery.value,
-      kbId: selectedKbId.value || null,
       searchType: searchType.value,
       topK: 50,
       page: page,
-      pageSize: pageSize.value
+      pageSize: pageSize.value,
+      ...(selectedKbId.value && selectedKbId.value !== ALL_KB_ID ? { kbId: selectedKbId.value } : {})
     })
 
     if (res.data.code === 200) {
       const data = res.data.data
       searchResult.records = data.records || []
       searchResult.total = data.total || 0
-      // 滚动到顶部
+      searchResult.page = data.page || page
+      searchResult.pageSize = data.pageSize || pageSize.value
       window.scrollTo({ top: 0, behavior: 'smooth' })
     }
   } catch (error) {
@@ -412,6 +431,7 @@ async function handlePageChange(page) {
     loading.value = false
   }
 }
+
 
 // 知识库变更
 function handleKbChange() {
@@ -423,7 +443,7 @@ function handleKbChange() {
 // 查看详情
 async function viewDetail(item) {
   try {
-    const res = await request.get(`/api/knowledge/detail/${item.id}`)
+    const res = await request.get(`/knowledge/detail/${item.id}`)
     if (res.data.code === 200) {
       currentDetail.value = res.data.data
       detailDrawerVisible.value = true
@@ -442,7 +462,7 @@ async function previewDocument(item) {
   }
 
   try {
-    const res = await request.get(`/api/knowledge/document/preview/${item.sourceDocId}`)
+    const res = await request.get(`/knowledge/document/preview/${item.sourceDocId}`)
     if (res.data.code === 200) {
       previewUrl.value = res.data.data
       previewDialogVisible.value = true
@@ -549,6 +569,15 @@ onMounted(() => {
 .kb-desc {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.scope-tip {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 
 .search-type-tabs {

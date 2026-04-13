@@ -63,7 +63,7 @@ spring:
 
 elasticsearch:
   index-prefix: kb_
-  vector-dimension: 768
+  vector-dimension: 1024
   shards: 1
   replicas: 0
 
@@ -92,8 +92,8 @@ cors:
 
 ai:
   embedding:
-    model: text2vec-base-chinese
-    dimension: 768
+    model: text-embedding-v4
+    dimension: 1024
     api-url: http://localhost:8001
   chat:
     # 默认知识库编码（客服知识库）
@@ -104,6 +104,15 @@ ai:
     vector-match-topk: 10
     # 知识库检索结果数
     search-topk: 5
+
+kb:
+  chunking:
+    max-tokens: 450
+    min-tokens: 120
+    overlap-tokens: 60
+    include-summary: true
+    include-tags: true
+    include-document-metadata: true
 
 logging:
   level:

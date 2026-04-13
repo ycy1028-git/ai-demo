@@ -59,6 +59,25 @@
           </div>
         </el-form-item>
 
+        <el-form-item label="Embedding模型" prop="embeddingModelName">
+          <el-input
+            v-model="form.embeddingModelName"
+            :placeholder="embeddingModelNamePlaceholder"
+            maxlength="100"
+            show-word-limit
+          >
+            <template #prefix>
+              <el-icon><Cpu /></el-icon>
+            </template>
+          </el-input>
+          <div class="form-tip">
+            如果该配置用于向量化，请填写 Embedding 模型标识，如：
+            <el-tag size="small" effect="plain" style="margin: 0 2px;">text-embedding-3-large</el-tag>
+            <el-tag size="small" effect="plain" style="margin: 0 2px;">text-embedding-3-small</el-tag>
+            <el-tag size="small" effect="plain" style="margin: 0 2px;">text-embedding-v2</el-tag>
+          </div>
+        </el-form-item>
+
         <el-form-item label="模型描述">
           <el-input
             v-model="form.description"
@@ -85,6 +104,22 @@
           </el-input>
           <div class="form-tip">
             留空将使用提供商的默认地址。如果使用代理或自定义端点，请填写完整URL
+          </div>
+        </el-form-item>
+
+        <el-form-item label="Embedding接口" prop="embeddingApiUrl">
+          <el-input
+            v-model="form.embeddingApiUrl"
+            :placeholder="embeddingApiUrlPlaceholder"
+            maxlength="500"
+            show-word-limit
+          >
+            <template #prefix>
+              <el-icon><Link /></el-icon>
+            </template>
+          </el-input>
+          <div class="form-tip">
+            向量化接口可与对话接口不同，留空将根据上方 API 地址自动补齐 <code>/embeddings</code>
           </div>
         </el-form-item>
 
@@ -215,6 +250,8 @@ const form = reactive({
   apiUrl: '',
   apiKey: '',
   modelName: '',
+  embeddingApiUrl: '',
+  embeddingModelName: '',
   temperature: 0.7,
   maxTokens: 2000,
   enabled: true,
@@ -227,19 +264,27 @@ const form = reactive({
 const providerConfigs = {
   qwen: {
     modelNamePlaceholder: '如：qwen-plus、qwen-turbo、qwen-max',
-    apiUrlPlaceholder: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    apiUrlPlaceholder: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    embeddingModelPlaceholder: '如：text-embedding-v2',
+    embeddingApiUrlPlaceholder: 'https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings'
   },
   deepseek: {
     modelNamePlaceholder: '如：deepseek-chat、deepseek-coder',
-    apiUrlPlaceholder: 'https://api.deepseek.com/v1'
+    apiUrlPlaceholder: 'https://api.deepseek.com/v1',
+    embeddingModelPlaceholder: '如：deepseek-embedding',
+    embeddingApiUrlPlaceholder: 'https://api.deepseek.com/v1/embeddings'
   },
   zhipu: {
     modelNamePlaceholder: '如：glm-4、glm-4-flash、glm-4-plus',
-    apiUrlPlaceholder: 'https://open.bigmodel.cn/api/paas/v4'
+    apiUrlPlaceholder: 'https://open.bigmodel.cn/api/paas/v4',
+    embeddingModelPlaceholder: '如：embedding-2、text-embedding',
+    embeddingApiUrlPlaceholder: 'https://open.bigmodel.cn/api/paas/v4/embeddings'
   },
   openai: {
     modelNamePlaceholder: '如：gpt-4o-mini、gpt-4o、gpt-3.5-turbo',
-    apiUrlPlaceholder: 'https://api.openai.com/v1'
+    apiUrlPlaceholder: 'https://api.openai.com/v1',
+    embeddingModelPlaceholder: '如：text-embedding-3-large、text-embedding-3-small',
+    embeddingApiUrlPlaceholder: 'https://api.openai.com/v1/embeddings'
   }
 }
 
@@ -249,6 +294,14 @@ const modelNamePlaceholder = computed(() => {
 
 const apiUrlPlaceholder = computed(() => {
   return providerConfigs[form.provider]?.apiUrlPlaceholder || '留空使用默认地址'
+})
+
+const embeddingModelNamePlaceholder = computed(() => {
+  return providerConfigs[form.provider]?.embeddingModelPlaceholder || '请输入Embedding模型标识，如：text-embedding-3-large'
+})
+
+const embeddingApiUrlPlaceholder = computed(() => {
+  return providerConfigs[form.provider]?.embeddingApiUrlPlaceholder || '留空使用默认Embeddings地址'
 })
 
 // 表单验证规则
@@ -272,6 +325,7 @@ const rules = {
 // 提供商变化时清空API地址，让用户重新输入或使用默认值
 function handleProviderChange() {
   form.apiUrl = ''
+  form.embeddingApiUrl = ''
 }
 
 // 获取详情
@@ -281,11 +335,13 @@ async function fetchDetail() {
   try {
     const res = await getModelConfigById(route.params.id)
     const data = res.data || res
-    Object.assign(form, {
-      name: data.name,
-      provider: data.provider,
-      apiUrl: data.apiUrl || '',
-      modelName: data.modelName,
+      Object.assign(form, {
+        name: data.name,
+        provider: data.provider,
+        apiUrl: data.apiUrl || '',
+        embeddingApiUrl: data.embeddingApiUrl || '',
+        modelName: data.modelName,
+      embeddingModelName: data.embeddingModelName || '',
       temperature: data.temperature || 0.7,
       maxTokens: data.maxTokens || 2000,
       enabled: data.enabled,

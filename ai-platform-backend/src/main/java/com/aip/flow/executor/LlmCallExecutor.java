@@ -136,10 +136,17 @@ public class LlmCallExecutor extends BaseNodeExecutor {
 
         if (context.getHistory() != null) {
             for (String historyMsg : context.getHistory()) {
+                if (historyMsg == null || historyMsg.isBlank()) {
+                    continue;
+                }
+
                 if (historyMsg.startsWith("用户:") || historyMsg.startsWith("User:")) {
                     messages.add(Map.of("role", "user", "content", historyMsg.replaceFirst("^.{2,5}:\\s*", "")));
                 } else if (historyMsg.startsWith("AI:") || historyMsg.startsWith("助手:")) {
                     messages.add(Map.of("role", "assistant", "content", historyMsg.replaceFirst("^.{2,5}:\\s*", "")));
+                } else {
+                    // 兼容旧数据格式（无角色前缀）
+                    messages.add(Map.of("role", "user", "content", historyMsg));
                 }
             }
         }
@@ -267,7 +274,7 @@ public class LlmCallExecutor extends BaseNodeExecutor {
                 throw new RuntimeException(errorRef.get());
             }
 
-            if (fullContent.length() == 0) {
+            if (fullContent.isEmpty()) {
                 log.warn("流式响应为空");
                 String fallback = "抱歉，AI 响应为空。";
                 chunkCallback.accept(fallback);

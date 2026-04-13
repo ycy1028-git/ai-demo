@@ -28,6 +28,21 @@
             <el-tag size="small">{{ row.code }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="esIndex" label="文本索引" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="mono">{{ row.esIndex || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="向量索引" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="mono">{{ row.vectorIndex || row.esIndex || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="bucketName" label="MinIO 桶" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="mono">{{ row.bucketName || '-' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="sceneDescription" label="业务场景" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
             <span>{{ row.sceneDescription || '-' }}</span>
@@ -49,11 +64,19 @@
           </template>
         </el-table-column>
         <el-table-column prop="createdAt" label="创建时间" width="160" />
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link @click="handleEdit(row)">编辑</el-button>
             <el-button type="primary" link @click="handleManage(row)">知识</el-button>
             <el-button type="primary" link @click="handleDocuments(row)">文档</el-button>
+            <el-button
+              type="warning"
+              link
+              :loading="rebuildingIds.includes(row.id)"
+              @click="handleRebuildIndex(row)"
+            >
+              重建索引
+            </el-button>
             <el-button type="danger" link @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -95,7 +118,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import SearchBar from '@/components/SearchBar.vue'
-import { getKnowledgeBaseList, deleteKnowledgeBase } from '@/api/knowledge'
+import { getKnowledgeBaseList, deleteKnowledgeBase, rebuildKnowledgeBaseIndex } from '@/api/knowledge'
 
 const router = useRouter()
 
@@ -104,6 +127,7 @@ const loading = ref(false)
 const deleteLoading = ref(false)
 const deleteDialogVisible = ref(false)
 const currentRow = ref(null)
+const rebuildingIds = ref([])
 
 // 搜索字段配置
 const searchFields = [
@@ -153,6 +177,9 @@ async function fetchData() {
         id: item.id,
         name: item.name,
         code: item.code,
+        esIndex: item.esIndex,
+        vectorIndex: item.vectorIndex,
+        bucketName: item.bucketName,
         description: item.description,
         sceneDescription: item.sceneDescription,
         documentCount: item.documentCount || item.itemCount || 0,
@@ -219,6 +246,43 @@ function handleDocuments(row) {
   router.push({ path: '/knowledge/item', query: { baseId: row.id, tab: 'document' } })
 }
 
+// 重建索引
+async function handleRebuildIndex(row) {
+  if (rebuildingIds.value.includes(row.id)) {
+    return
+  }
+
+  await ElMessageBox.confirm(
+    `确定重建知识库「${row.name}」的索引吗？该操作会删除旧索引并重新向量化全部知识。`,
+    '重建索引确认',
+    {
+      confirmButtonText: '确定重建',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }
+  )
+
+  rebuildingIds.value = [...rebuildingIds.value, row.id]
+  try {
+    const res = await rebuildKnowledgeBaseIndex(row.id)
+    const stats = res?.data?.vectorization || {}
+    const total = stats.total ?? 0
+    const success = stats.success ?? 0
+    const failed = stats.failed ?? 0
+
+    if (failed > 0) {
+      ElMessage.warning(`重建完成：共 ${total} 条，成功 ${success} 条，失败 ${failed} 条`) 
+    } else {
+      ElMessage.success(`重建完成：共 ${total} 条，全部向量化成功`)
+    }
+    await fetchData()
+  } catch (error) {
+    console.error('重建索引失败:', error)
+  } finally {
+    rebuildingIds.value = rebuildingIds.value.filter(id => id !== row.id)
+  }
+}
+
 // 删除
 function handleDelete(row) {
   currentRow.value = row
@@ -274,6 +338,12 @@ onMounted(() => {
 
   .oss-path {
     font-family: monospace;
+    font-size: 12px;
+    color: #606266;
+  }
+
+  .mono {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 12px;
     color: #606266;
   }

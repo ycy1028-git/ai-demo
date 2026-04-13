@@ -2,6 +2,7 @@ package com.aip.knowledge.service;
 
 import com.aip.common.exception.BusinessException;
 import com.aip.common.result.PageResult;
+import com.aip.knowledge.config.ElasticsearchIndexConfig;
 import com.aip.knowledge.dto.KnowledgeItemDTO;
 import com.aip.knowledge.entity.KnowledgeBase;
 import com.aip.knowledge.entity.KnowledgeItem;
@@ -17,6 +18,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import com.aip.knowledge.service.chunk.ChunkType;
+import com.aip.knowledge.service.chunk.StructuredContentChunker;
+import com.aip.knowledge.service.chunk.TextChunk;
 
 import java.util.*;
 
@@ -40,9 +45,13 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
     private ElasticsearchService elasticsearchService;
 
     @Autowired
+    private ElasticsearchIndexConfig indexConfig;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
-    private static final int CHUNK_SIZE = 500;
+    @Autowired
+    private StructuredContentChunker contentChunker;
 
     @Override
     public PageResult<KnowledgeItem> page(String kbId, String keyword, Integer status, int page, int size) {
@@ -130,6 +139,16 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
         item.setSourceDocId(dto.getSourceDocId());
         item.setVectorStatus(0);
 
+        if (dto.getMinioPath() != null && !dto.getMinioPath().isBlank()) {
+            item.setMinioPath(dto.getMinioPath());
+            item.setOriginalFileName(dto.getOriginalFileName());
+            item.setFileType(dto.getFileType());
+        } else {
+            item.setMinioPath(null);
+            item.setOriginalFileName(null);
+            item.setFileType(null);
+        }
+
         if (dto.getTags() != null) {
             try {
                 item.setTags(objectMapper.writeValueAsString(dto.getTags()));
@@ -155,7 +174,9 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
                 .orElse(null);
 
         if (knowledgeBase != null) {
-            elasticsearchService.deleteDocument(knowledgeBase.getEsIndex(), id);
+            for (String index : resolveTargetIndexes(knowledgeBase)) {
+                elasticsearchService.deleteDocumentsByItemId(index, id);
+            }
         }
 
         knowledgeItemMapper.deleteById(id);
@@ -188,12 +209,37 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
             item.setVectorStatus(1);
             knowledgeItemMapper.save(item);
 
-            List<String> chunks = splitIntoChunks(item.getContent(), CHUNK_SIZE);
+            Set<String> targetIndexes = resolveTargetIndexes(knowledgeBase);
+            targetIndexes.forEach(elasticsearchService::createIndex);
+
+            String vectorIndex = resolveVectorIndex(knowledgeBase);
+            int expectedDimension = resolveExpectedDimension(item, vectorIndex, knowledgeBase);
+
+            for (String index : targetIndexes) {
+                elasticsearchService.deleteDocumentsByItemId(index, item.getId());
+            }
+
+            List<TextChunk> chunks = contentChunker.chunk(item);
+            if (chunks.isEmpty()) {
+                String fallback = item.getContent() != null ? item.getContent() : "";
+                chunks = List.of(new TextChunk(
+                        fallback,
+                        ChunkType.PARAGRAPH,
+                        List.of(),
+                        List.of(ChunkType.PARAGRAPH)
+                ));
+            }
+
             List<Map<String, Object>> documents = new ArrayList<>();
 
             for (int i = 0; i < chunks.size(); i++) {
-                String chunkText = chunks.get(i);
+                TextChunk chunk = chunks.get(i);
+                if (chunk.text() == null || chunk.text().isBlank()) {
+                    continue;
+                }
+                String chunkText = chunk.text();
                 float[] vector = embeddingService.embed(chunkText);
+                validateVectorDimension(vectorIndex, item, knowledgeBase, vector, expectedDimension);
 
                 Map<String, Object> doc = new HashMap<>();
                 doc.put("kbId", item.getKbId());
@@ -205,6 +251,9 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
                 doc.put("status", item.getStatus());
                 doc.put("chunkIndex", i);
                 doc.put("totalChunks", chunks.size());
+                doc.put("chunkType", chunk.primaryType().name());
+                doc.put("chunkTypes", chunk.segmentTypes().stream().map(Enum::name).toList());
+                doc.put("anchors", chunk.anchors());
 
                 List<Float> vectorList = new ArrayList<>();
                 for (float v : vector) {
@@ -216,7 +265,9 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
             }
 
             if (!documents.isEmpty()) {
-                elasticsearchService.bulkIndex(knowledgeBase.getEsIndex(), documents);
+                for (String index : targetIndexes) {
+                    elasticsearchService.bulkIndex(index, documents);
+                }
             }
 
             item.setVectorStatus(2);
@@ -229,7 +280,10 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
             log.error("向量化失败: {}", item.getId(), e);
             item.setVectorStatus(3);
             knowledgeItemMapper.save(item);
-            throw new BusinessException("向量化失败: " + e.getMessage());
+            if (e instanceof BusinessException businessException) {
+                throw businessException;
+            }
+            throw new BusinessException("向量化失败: " + e.getMessage(), e);
         }
     }
 
@@ -247,7 +301,7 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
 
     @Override
     @Transactional
-    public void vectorizeAll(String kbId) {
+    public Map<String, Object> vectorizeAll(String kbId) {
         List<KnowledgeItem> items = listByKbId(kbId);
         KnowledgeBase knowledgeBase = knowledgeBaseMapper.findById(kbId)
                 .orElseThrow(() -> new BusinessException("知识库不存在"));
@@ -266,6 +320,13 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
         }
 
         log.info("批量向量化完成: 成功={}, 失败={}", success, failed);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("kbId", kbId);
+        result.put("total", items.size());
+        result.put("success", success);
+        result.put("failed", failed);
+        return result;
     }
 
     @Override
@@ -300,38 +361,69 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
         }
     }
 
-    private List<String> splitIntoChunks(String text, int chunkSize) {
-        List<String> chunks = new ArrayList<>();
-        if (text == null || text.isBlank()) {
-            chunks.add("");
-            return chunks;
+    private void validateVectorDimension(String indexName, KnowledgeItem item, KnowledgeBase knowledgeBase, float[] vector, int expectedDimension) {
+        int actualDimension = vector == null ? 0 : vector.length;
+        if (actualDimension != expectedDimension) {
+            throw new BusinessException(String.format(
+                    "向量维度不匹配: index=%s, itemId=%s, mapping=%d, embedding=%d。请调用 POST /kb/knowledge-base/%s/rebuild-index 重建索引，或调整 embedding 模型维度",
+                    indexName,
+                    item.getId(),
+                    expectedDimension,
+                    actualDimension,
+                    knowledgeBase.getId()
+            ));
+        }
+    }
+
+    private int resolveExpectedDimension(KnowledgeItem item, String indexName, KnowledgeBase knowledgeBase) {
+        Integer indexDimension = elasticsearchService.getIndexVectorDimension(indexName);
+        if (indexDimension == null || indexDimension <= 0) {
+            throw new BusinessException(String.format(
+                    "知识库索引缺少向量映射: index=%s, itemId=%s。请调用 POST /kb/knowledge-base/%s/rebuild-index 重建索引",
+                    indexName,
+                    item.getId(),
+                    knowledgeBase.getId()
+            ));
         }
 
-        String[] paragraphs = text.split("\n");
-        StringBuilder currentChunk = new StringBuilder();
-        for (String paragraph : paragraphs) {
-            if (currentChunk.length() + paragraph.length() > chunkSize) {
-                if (currentChunk.length() > 0) {
-                    chunks.add(currentChunk.toString().trim());
-                    currentChunk = new StringBuilder();
-                }
-                if (paragraph.length() > chunkSize) {
-                    for (int i = 0; i < paragraph.length(); i += chunkSize) {
-                        int end = Math.min(i + chunkSize, paragraph.length());
-                        chunks.add(paragraph.substring(i, end));
-                    }
-                } else {
-                    currentChunk.append(paragraph);
-                }
-            } else {
-                currentChunk.append(paragraph).append("\n");
-            }
+        int configuredDimension = indexConfig.getVectorDimension();
+        if (indexDimension != configuredDimension) {
+            throw new BusinessException(String.format(
+                    "知识库索引维度与配置不一致: index=%s, mapping=%d, config=%d, itemId=%s。请调用 POST /kb/knowledge-base/%s/rebuild-index 重建索引",
+                    indexName,
+                    indexDimension,
+                    configuredDimension,
+                    item.getId(),
+                    knowledgeBase.getId()
+            ));
         }
 
-        if (currentChunk.length() > 0) {
-            chunks.add(currentChunk.toString().trim());
-        }
+        return indexDimension;
+    }
 
-        return chunks;
+    private Set<String> resolveTargetIndexes(KnowledgeBase knowledgeBase) {
+        Set<String> indexes = new LinkedHashSet<>();
+        if (knowledgeBase == null) {
+            return indexes;
+        }
+        if (knowledgeBase.getEsIndex() != null) {
+            indexes.add(knowledgeBase.getEsIndex());
+        }
+        String vectorIndex = resolveVectorIndex(knowledgeBase);
+        if (vectorIndex != null) {
+            indexes.add(vectorIndex);
+        }
+        return indexes;
+    }
+
+    private String resolveVectorIndex(KnowledgeBase knowledgeBase) {
+        if (knowledgeBase == null) {
+            return null;
+        }
+        String vectorIndex = knowledgeBase.getVectorIndex();
+        if (vectorIndex != null && !vectorIndex.isBlank()) {
+            return vectorIndex;
+        }
+        return knowledgeBase.getEsIndex();
     }
 }

@@ -1,5 +1,8 @@
 package com.aip.knowledge.service;
 
+import com.aip.ai.entity.AiModelConfig;
+import com.aip.ai.service.IAiModelConfigService;
+import com.aip.common.utils.ApiKeyEncryptUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,9 +22,15 @@ import java.util.Random;
 @Service
 public class EmbeddingService {
 
+    private final IAiModelConfigService aiModelConfigService;
+
+    public EmbeddingService(IAiModelConfigService aiModelConfigService) {
+        this.aiModelConfigService = aiModelConfigService;
+    }
+
     /** 向量维度 */
-    @Value("${ai.embedding.dimension:768}")
-    private int vectorDimension;
+    @Value("${ai.embedding.dimension:1024}")
+    private volatile int vectorDimension;
 
     /** Embedding服务地址 */
     @Value("${ai.embedding.api-url:http://localhost:8001}")
@@ -43,7 +52,16 @@ public class EmbeddingService {
             throw new IllegalArgumentException("文本不能为空");
         }
 
-        // 尝试调用远程embedding服务
+        // 优先使用默认 embedding 模型配置
+        try {
+            float[] vector = callEmbeddingByModelConfig(text);
+            log.debug("模型配置向量化成功, 长度: {} 字符, 维度: {}", text.length(), vector.length);
+            return vector;
+        } catch (Exception e) {
+            log.warn("模型配置向量化失败，回退到 embedding.api-url: {}", e.getMessage());
+        }
+
+        // 回退调用独立 embedding 服务
         try {
             float[] vector = callEmbeddingApi(text);
             log.debug("远程向量化成功, 长度: {} 字符, 维度: {}", text.length(), vector.length);
@@ -89,6 +107,63 @@ public class EmbeddingService {
             vector[i] = embeddingList.get(i).floatValue();
         }
 
+        refreshVectorDimension(vector.length);
+        return vector;
+    }
+
+    /**
+     * 使用默认 embedding 模型配置进行向量化（OpenAI兼容 /embeddings）
+     */
+    private float[] callEmbeddingByModelConfig(String text) {
+        AiModelConfig embeddingModel = aiModelConfigService.getDefaultModel();
+
+        if (restTemplate == null) {
+            restTemplate = new RestTemplate();
+        }
+
+        String apiUrl = embeddingModel.getEmbeddingApiUrl();
+        if (apiUrl == null || apiUrl.isBlank()) {
+            throw new RuntimeException("Embedding API 地址未配置");
+        }
+        String apiKey = ApiKeyEncryptUtil.decrypt(embeddingModel.getApiKey());
+
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(apiKey);
+
+        Map<String, Object> request = new HashMap<>();
+        String modelName = embeddingModel.getResolvedEmbeddingModelName();
+        if (modelName == null || modelName.isBlank()) {
+            throw new RuntimeException("Embedding 模型未配置");
+        }
+        request.put("model", modelName);
+        request.put("input", text);
+
+        org.springframework.http.HttpEntity<Map<String, Object>> entity =
+                new org.springframework.http.HttpEntity<>(request, headers);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> response = restTemplate.postForObject(apiUrl, entity, Map.class);
+
+        if (response == null || !response.containsKey("data")) {
+            throw new RuntimeException("Embedding API返回格式错误: 缺少 data 字段");
+        }
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> dataList = (List<Map<String, Object>>) response.get("data");
+        if (dataList == null || dataList.isEmpty() || !dataList.get(0).containsKey("embedding")) {
+            throw new RuntimeException("Embedding API返回格式错误: data[0].embedding 不存在");
+        }
+
+        @SuppressWarnings("unchecked")
+        List<Number> embeddingList = (List<Number>) dataList.get(0).get("embedding");
+
+        float[] vector = new float[embeddingList.size()];
+        for (int i = 0; i < embeddingList.size(); i++) {
+            vector[i] = embeddingList.get(i).floatValue();
+        }
+
+        refreshVectorDimension(vector.length);
         return vector;
     }
 
@@ -187,5 +262,12 @@ public class EmbeddingService {
      */
     public int getDimension() {
         return vectorDimension;
+    }
+
+    private synchronized void refreshVectorDimension(int actualDimension) {
+        if (actualDimension > 0 && this.vectorDimension != actualDimension) {
+            log.info("检测到Embedding维度变化: {} -> {}", this.vectorDimension, actualDimension);
+            this.vectorDimension = actualDimension;
+        }
     }
 }

@@ -18,6 +18,7 @@ import java.util.Map;
 public class FlowContext implements Serializable {
 
     private static final long serialVersionUID = 1L;
+    private static final int MAX_HISTORY_SIZE = 20;
 
     /** 会话ID，唯一标识一次对话会话 */
     private String sessionId;
@@ -73,7 +74,6 @@ public class FlowContext implements Serializable {
     public FlowContext(String userId, String currentMessage) {
         this(userId);
         this.currentMessage = currentMessage;
-        this.history.add(currentMessage);
     }
 
     /**
@@ -81,10 +81,28 @@ public class FlowContext implements Serializable {
      * @param message 对话消息内容
      */
     public void addHistory(String message) {
+        if (message == null || message.isBlank()) {
+            return;
+        }
         if (this.history == null) {
             this.history = new ArrayList<>();
         }
-        this.history.add(message);
+        this.history.add(message.trim());
+        trimHistory();
+    }
+
+    /**
+     * 添加用户消息到历史
+     */
+    public void addUserMessage(String message) {
+        addHistory("用户: " + message);
+    }
+
+    /**
+     * 添加助手消息到历史
+     */
+    public void addAssistantMessage(String message) {
+        addHistory("AI: " + message);
     }
 
     /**
@@ -126,5 +144,13 @@ public class FlowContext implements Serializable {
      */
     private String generateSessionId() {
         return "sess_" + System.currentTimeMillis() + "_" + (int)(Math.random() * 10000);
+    }
+
+    private void trimHistory() {
+        if (this.history == null || this.history.size() <= MAX_HISTORY_SIZE) {
+            return;
+        }
+        int removeCount = this.history.size() - MAX_HISTORY_SIZE;
+        this.history.subList(0, removeCount).clear();
     }
 }

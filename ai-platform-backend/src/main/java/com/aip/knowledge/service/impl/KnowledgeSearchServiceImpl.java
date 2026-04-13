@@ -74,8 +74,17 @@ public class KnowledgeSearchServiceImpl implements IKnowledgeSearchService {
             return PageResultDTO.of(Collections.emptyList(), 0, page, pageSize);
         }
 
+        boolean searchAll = shouldSearchAll(query.getKbId());
+
         // 根据搜索类型执行搜索
-        allResults = performSearch(knowledgeBases, query.getKeyword(), searchType, topK);
+        allResults = switch (searchType) {
+            case "keyword" -> performKeywordSearch(knowledgeBases, query.getKeyword(), topK);
+            case "vector" -> searchByVector(knowledgeBases, query.getKeyword(), topK, searchAll);
+            case "hybrid" -> performHybridSearch(knowledgeBases, query.getKeyword(), topK, searchAll);
+            default -> performHybridSearch(knowledgeBases, query.getKeyword(), topK, searchAll);
+        };
+
+
 
         // 解析标签
         allResults.forEach(this::parseTags);
@@ -99,94 +108,69 @@ public class KnowledgeSearchServiceImpl implements IKnowledgeSearchService {
      * 确定要搜索的知识库
      */
     private List<KnowledgeBase> determineKnowledgeBases(String kbId) {
-        if (kbId != null && !kbId.isBlank()) {
-            KnowledgeBase kb = knowledgeBaseService.getById(kbId);
+        String normalizedKbId = kbId != null ? kbId.trim() : null;
+        boolean searchAll = shouldSearchAll(kbId);
+        if (!searchAll) {
+            KnowledgeBase kb = knowledgeBaseService.getById(normalizedKbId);
+
             return kb != null ? Collections.singletonList(kb) : Collections.emptyList();
         }
-        return knowledgeBaseService.list().stream()
+
+        List<KnowledgeBase> enabledKnowledgeBases = knowledgeBaseService.list().stream()
                 .filter(kb -> kb.getStatus() != null && kb.getStatus() == 1)
                 .collect(Collectors.toList());
+
+        return enabledKnowledgeBases;
     }
 
-    /**
-     * 执行搜索
-     */
-    private List<KnowledgeSearchResultDTO> performSearch(
-            List<KnowledgeBase> knowledgeBases, String keyword, String searchType, int topK) {
-
+    private List<KnowledgeSearchResultDTO> performKeywordSearch(List<KnowledgeBase> knowledgeBases,
+            String keyword, int topK) {
         List<KnowledgeSearchResultDTO> results = new ArrayList<>();
-
         for (KnowledgeBase kb : knowledgeBases) {
-            String esIndex = kb.getEsIndex();
-            if (esIndex == null || esIndex.isBlank()) {
-                continue;
-            }
-
-            try {
-                switch (searchType) {
-                    case "keyword":
-                        results.addAll(searchByKeyword(kb, keyword, topK));
-                        break;
-                    case "vector":
-                        results.addAll(searchByVector(kb, keyword, topK));
-                        break;
-                    case "hybrid":
-                    default:
-                        results.addAll(searchHybrid(kb, keyword, topK));
-                        break;
-                }
-            } catch (Exception e) {
-                log.error("搜索知识库失败: kb={}, error={}", kb.getName(), e.getMessage());
-            }
+            ensureKnowledgeBaseIndex(kb);
+            results.addAll(searchByKeyword(kb, keyword, topK));
         }
-
-        // 按分数排序
         results.sort((a, b) -> Double.compare(
                 b.getScore() != null ? b.getScore() : 0,
                 a.getScore() != null ? a.getScore() : 0
         ));
-
         return results;
     }
 
-    /**
-     * 关键词搜索
-     */
     private List<KnowledgeSearchResultDTO> searchByKeyword(KnowledgeBase kb, String keyword, int topK) {
-        List<Map<String, Object>> esResults = elasticsearchService.searchByKeywordRaw(kb.getEsIndex(), keyword, topK);
-        return convertEsResultsToDto(esResults, kb, "keyword");
-    }
-
-    /**
-     * 向量搜索
-     */
-    private List<KnowledgeSearchResultDTO> searchByVector(KnowledgeBase kb, String queryText, int topK) {
+        if (kb == null) {
+            return Collections.emptyList();
+        }
+        String esIndex = kb.getEsIndex();
+        if (esIndex == null || esIndex.isBlank()) {
+            return Collections.emptyList();
+        }
         try {
-            float[] vector = embeddingService.embed(queryText);
-            List<Map<String, Object>> esResults = elasticsearchService.similaritySearchRaw(kb.getEsIndex(), vector, topK);
-            return convertEsResultsToDto(esResults, kb, "vector");
+            List<Map<String, Object>> esResults = elasticsearchService.searchByKeywordRaw(
+                    esIndex,
+                    keyword,
+                    topK
+            );
+            return convertEsResultsToDto(esResults, kb);
         } catch (Exception e) {
-            log.error("向量搜索失败: kb={}, error={}", kb.getName(), e.getMessage());
+            log.error("关键词搜索失败: kb={}, error={}", kb.getName(), e.getMessage());
             return Collections.emptyList();
         }
     }
 
-    /**
-     * 混合搜索
-     */
-    private List<KnowledgeSearchResultDTO> searchHybrid(KnowledgeBase kb, String keyword, int topK) {
-        List<KnowledgeSearchResultDTO> keywordResults = searchByKeyword(kb, keyword, topK);
-        List<KnowledgeSearchResultDTO> vectorResults = searchByVector(kb, keyword, topK);
+    private List<KnowledgeSearchResultDTO> performHybridSearch(
+            List<KnowledgeBase> knowledgeBases, String keyword, int topK, boolean searchAll) {
+        List<KnowledgeSearchResultDTO> keywordResults = performKeywordSearch(knowledgeBases, keyword, topK);
+        List<KnowledgeSearchResultDTO> vectorResults = searchByVector(knowledgeBases, keyword, topK, searchAll);
 
-        // 合并去重
         Map<String, KnowledgeSearchResultDTO> merged = new LinkedHashMap<>();
-        keywordResults.forEach(r -> {
-            r.setScore(normalizeScore(r.getScore(), "keyword"));
-            merged.put(r.getId(), r);
+        keywordResults.forEach(result -> {
+            result.setScore(normalizeScore(result.getScore(), "keyword"));
+            merged.put(result.getId(), result);
         });
-        vectorResults.forEach(r -> {
-            r.setScore(normalizeScore(r.getScore(), "vector"));
-            merged.merge(r.getId(), r, (existing, newOne) -> {
+        vectorResults.forEach(result -> {
+            result.setScore(normalizeScore(result.getScore(), "vector"));
+            merged.merge(result.getId(), result, (existing, newOne) -> {
                 double avgScore = (existing.getScore() + newOne.getScore()) / 2;
                 existing.setScore(avgScore);
                 return existing;
@@ -196,9 +180,87 @@ public class KnowledgeSearchServiceImpl implements IKnowledgeSearchService {
         return new ArrayList<>(merged.values());
     }
 
-    /**
-     * 标准化分数
-     */
+    private List<KnowledgeSearchResultDTO> searchByVector(
+            List<KnowledgeBase> knowledgeBases, String queryText, int topK, boolean searchAll) {
+        if (knowledgeBases.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        if (searchAll && knowledgeBases.size() > 1) {
+            ensureKnowledgeBasesIndexed(knowledgeBases);
+            return searchByVectorAcrossIndexes(knowledgeBases, queryText, topK);
+        }
+
+        List<KnowledgeSearchResultDTO> results = new ArrayList<>();
+        for (KnowledgeBase kb : knowledgeBases) {
+            ensureKnowledgeBaseIndex(kb);
+            results.addAll(searchByVectorForKb(kb, queryText, topK));
+        }
+        return results;
+    }
+
+    private List<KnowledgeSearchResultDTO> searchByVectorForKb(KnowledgeBase kb, String queryText, int topK) {
+        try {
+            float[] vector = embeddingService.embed(queryText);
+            List<Map<String, Object>> esResults = elasticsearchService.similaritySearchRaw(kb.getEsIndex(), vector, topK);
+            return convertEsResultsToDto(esResults, kb);
+        } catch (Exception e) {
+            log.error("向量搜索失败: kb={}, error={}", kb.getName(), e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    private List<KnowledgeSearchResultDTO> searchByVectorAcrossIndexes(
+            List<KnowledgeBase> knowledgeBases, String queryText, int topK) {
+        float[] vector = embeddingService.embed(queryText);
+        List<String> indexes = knowledgeBases.stream()
+                .map(KnowledgeBase::getEsIndex)
+                .filter(esIndex -> esIndex != null && !esIndex.isBlank())
+                .distinct()
+                .toList();
+        if (indexes.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        Map<String, KnowledgeBase> indexMap = knowledgeBases.stream()
+                .filter(kb -> kb.getEsIndex() != null && !kb.getEsIndex().isBlank())
+                .collect(Collectors.toMap(KnowledgeBase::getEsIndex, kb -> kb, (a, b) -> a));
+        Map<String, KnowledgeBase> idMap = knowledgeBases.stream()
+                .collect(Collectors.toMap(KnowledgeBase::getId, kb -> kb, (a, b) -> a));
+
+        List<Map<String, Object>> esResults = elasticsearchService.similaritySearchAcrossIndexes(indexes, vector, topK);
+        return convertEsResultsToDto(esResults, null, indexMap, idMap);
+    }
+
+    private void ensureKnowledgeBaseIndex(KnowledgeBase kb) {
+        if (kb == null) {
+            return;
+        }
+        String esIndex = kb.getEsIndex();
+        if (esIndex == null || esIndex.isBlank()) {
+            return;
+        }
+        if (!elasticsearchService.indexExists(esIndex) || elasticsearchService.getIndexVectorDimension(esIndex) == null) {
+            elasticsearchService.createIndex(esIndex);
+            log.info("确保索引存在并带向量映射: {}", esIndex);
+        }
+    }
+
+    private void ensureKnowledgeBasesIndexed(List<KnowledgeBase> knowledgeBases) {
+        knowledgeBases.forEach(this::ensureKnowledgeBaseIndex);
+    }
+
+    private boolean shouldSearchAll(String kbId) {
+        if (kbId == null) {
+            return true;
+        }
+        String normalizedKbId = kbId.trim();
+        return normalizedKbId.isBlank()
+                || "null".equalsIgnoreCase(normalizedKbId)
+                || "undefined".equalsIgnoreCase(normalizedKbId)
+                || "all".equalsIgnoreCase(normalizedKbId);
+    }
+
     private double normalizeScore(Double score, String searchType) {
         if (score == null) return 0.0;
         // 关键词搜索的ES分数通常很高，向量搜索的余弦相似度是0-1
@@ -209,20 +271,31 @@ public class KnowledgeSearchServiceImpl implements IKnowledgeSearchService {
         return Math.log1p(score) / Math.log(100);
     }
 
-    /**
-     * 转换ES结果为DTO
-     */
     private List<KnowledgeSearchResultDTO> convertEsResultsToDto(
-            List<Map<String, Object>> esResults, KnowledgeBase kb, String searchType) {
+            List<Map<String, Object>> esResults, KnowledgeBase kb) {
+        return convertEsResultsToDto(esResults, kb, null, null);
+    }
+
+    private List<KnowledgeSearchResultDTO> convertEsResultsToDto(
+            List<Map<String, Object>> esResults,
+            KnowledgeBase kb,
+            Map<String, KnowledgeBase> indexMap,
+            Map<String, KnowledgeBase> idMap) {
 
         return esResults.stream().map(result -> {
+            KnowledgeBase resolvedKb = resolveKnowledgeBase(result, kb, indexMap, idMap);
             KnowledgeSearchResultDTO dto = new KnowledgeSearchResultDTO();
             dto.setId(getStringValue(result, "id"));
             dto.setTitle(getStringValue(result, "title"));
             dto.setContent(getStringValue(result, "content"));
             dto.setSummary(getStringValue(result, "summary"));
-            dto.setKbId(kb.getId());
-            dto.setKbName(kb.getName());
+            if (resolvedKb != null) {
+                dto.setKbId(resolvedKb.getId());
+                dto.setKbName(resolvedKb.getName());
+            } else {
+                dto.setKbId(getStringValue(result, "kbId"));
+                dto.setKbName(getStringValue(result, "kbName"));
+            }
             dto.setSourceType(getStringValue(result, "sourceType"));
             dto.setSourceDocId(getStringValue(result, "sourceDocId"));
             dto.setOriginalFileName(getStringValue(result, "originalFileName"));
@@ -230,7 +303,6 @@ public class KnowledgeSearchServiceImpl implements IKnowledgeSearchService {
             dto.setScore(getDoubleValue(result, "score"));
             dto.setCreateTime(getStringValue(result, "createdAt"));
 
-            // 补充知识库信息
             if (dto.getSourceDocId() != null) {
                 try {
                     Document doc = documentMapper.findById(dto.getSourceDocId()).orElse(null);
@@ -246,6 +318,33 @@ public class KnowledgeSearchServiceImpl implements IKnowledgeSearchService {
             return dto;
         }).collect(Collectors.toList());
     }
+
+    private KnowledgeBase resolveKnowledgeBase(
+            Map<String, Object> result,
+            KnowledgeBase fallback,
+            Map<String, KnowledgeBase> indexMap,
+            Map<String, KnowledgeBase> idMap) {
+        if (fallback != null) {
+            return fallback;
+        }
+        if (indexMap != null) {
+            String indexName = getStringValue(result, "_index");
+            if (indexName != null) {
+                KnowledgeBase kb = indexMap.get(indexName);
+                if (kb != null) {
+                    return kb;
+                }
+            }
+        }
+        if (idMap != null) {
+            String kbId = getStringValue(result, "kbId");
+            if (kbId != null) {
+                return idMap.get(kbId);
+            }
+        }
+        return null;
+    }
+
 
     private String getStringValue(Map<String, Object> map, String key) {
         Object value = map.get(key);

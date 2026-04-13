@@ -17,6 +17,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.function.Consumer;
 
 /**
@@ -77,51 +79,28 @@ public class FlowEngine implements IFlowEngine {
     @Override
     public NodeResult execute(String userId, String userMessage) {
         try {
-            // ========== 1. 加载上下文 ==========
             FlowContext context = contextManager.getContext(userId);
+            NodeResult result;
 
-            // ========== 2. 无上下文：首次对话 ==========
             if (context == null) {
-                // 初始化上下文
                 context = initContext(userId, userMessage);
-
-                // 执行意图路由（LLM 分析用户意图）
-                IntentRouteResult routeResult = intentRouterService.route(userMessage, context);
-
-                // 更新上下文中的模板信息
-                context.setTemplateCode(routeResult.getTemplateCode());
-                context.setStatus(routeResult.isNeedMoreInput() ? "waiting" : "running");
-
-                // 合并抽取到的参数
-                if (routeResult.getParams() != null) {
-                    context.getParams().putAll(routeResult.getParams());
-                }
-
-                // 如果置信度低，需要追问用户
-                if (routeResult.isNeedMoreInput()) {
-                    contextManager.saveContext(context);
-                    return NodeResult.needInput(routeResult.getPrompt());
-                }
-
-                contextManager.saveContext(context);
-
-                // 根据路由类型执行（固定模板/动态规划/直接回答/兜底）
-                return executeByRouteType(routeResult, context);
-
-            } 
-            // ========== 3. 有上下文：多轮对话 ==========
-            else {
-                // 更新当前消息和历史
-                context.setCurrentMessage(userMessage);
-                context.addHistory(userMessage);
-                context.getParams().put("_current_message", userMessage);
-                
-                // 刷新上下文过期时间
+                result = routeAndExecute(context, userMessage);
+            } else {
                 contextManager.refreshExpire(userId);
 
-                // 继续执行当前流程
-                return continueExecution(context);
+                if ("waiting".equals(context.getStatus())) {
+                    context.setCurrentMessage(userMessage);
+                    context.getParams().put("_current_message", userMessage);
+                    result = continueExecution(context);
+                } else {
+                    prepareNewTurn(context, userMessage);
+                    result = routeAndExecute(context, userMessage);
+                }
             }
+
+            appendConversationTurn(context, userMessage, result);
+            contextManager.saveContext(context);
+            return result;
 
         } catch (Exception e) {
             log.error("流程执行异常: userId={}, error={}", userId, e.getMessage(), e);
@@ -135,46 +114,108 @@ public class FlowEngine implements IFlowEngine {
     @Override
     public NodeResult executeStreaming(String userId, String userMessage, Consumer<String> onChunk) {
         try {
-            // ========== 1. 加载上下文 ==========
             FlowContext context = contextManager.getContext(userId);
+            NodeResult result;
 
-            // ========== 2. 无上下文：首次对话 ==========
             if (context == null) {
                 context = initContext(userId, userMessage);
-                IntentRouteResult routeResult = intentRouterService.route(userMessage, context);
-
-                context.setTemplateCode(routeResult.getTemplateCode());
-                context.setStatus(routeResult.isNeedMoreInput() ? "waiting" : "running");
-
-                if (routeResult.getParams() != null) {
-                    context.getParams().putAll(routeResult.getParams());
-                }
-
-                if (routeResult.isNeedMoreInput()) {
-                    contextManager.saveContext(context);
-                    return NodeResult.needInput(routeResult.getPrompt());
-                }
-
-                contextManager.saveContext(context);
-
-                // 流式执行
-                return executeByRouteTypeStreaming(routeResult, context, onChunk);
-
-            }
-            // ========== 3. 有上下文：多轮对话 ==========
-            else {
-                context.setCurrentMessage(userMessage);
-                context.addHistory(userMessage);
-                context.getParams().put("_current_message", userMessage);
+                result = routeAndExecuteStreaming(context, userMessage, onChunk);
+            } else {
                 contextManager.refreshExpire(userId);
 
-                return continueExecutionStreaming(context, onChunk);
+                if ("waiting".equals(context.getStatus())) {
+                    context.setCurrentMessage(userMessage);
+                    context.getParams().put("_current_message", userMessage);
+                    result = continueExecutionStreaming(context, onChunk);
+                } else {
+                    prepareNewTurn(context, userMessage);
+                    result = routeAndExecuteStreaming(context, userMessage, onChunk);
+                }
             }
+
+            appendConversationTurn(context, userMessage, result);
+            contextManager.saveContext(context);
+            return result;
 
         } catch (Exception e) {
             log.error("流程流式执行异常: userId={}, error={}", userId, e.getMessage(), e);
             onChunk.accept("抱歉，系统处理时遇到问题，请稍后再试。");
             return handleFlowError(e);
+        }
+    }
+
+    private NodeResult routeAndExecute(FlowContext context, String userMessage) {
+        IntentRouteResult routeResult = intentRouterService.route(userMessage, context);
+
+        context.setCurrentMessage(userMessage);
+        context.setTemplateCode(routeResult.getTemplateCode());
+        context.setStatus(routeResult.isNeedMoreInput() ? "waiting" : "running");
+
+        if (routeResult.getParams() != null) {
+            context.getParams().putAll(routeResult.getParams());
+        }
+        context.getParams().put("_current_message", userMessage);
+
+        if (routeResult.isNeedMoreInput()) {
+            return NodeResult.needInput(routeResult.getPrompt());
+        }
+
+        return executeByRouteType(routeResult, context);
+    }
+
+    private NodeResult routeAndExecuteStreaming(FlowContext context, String userMessage, Consumer<String> onChunk) {
+        IntentRouteResult routeResult = intentRouterService.route(userMessage, context);
+
+        context.setCurrentMessage(userMessage);
+        context.setTemplateCode(routeResult.getTemplateCode());
+        context.setStatus(routeResult.isNeedMoreInput() ? "waiting" : "running");
+
+        if (routeResult.getParams() != null) {
+            context.getParams().putAll(routeResult.getParams());
+        }
+        context.getParams().put("_current_message", userMessage);
+
+        if (routeResult.isNeedMoreInput()) {
+            return NodeResult.needInput(routeResult.getPrompt());
+        }
+
+        return executeByRouteTypeStreaming(routeResult, context, onChunk);
+    }
+
+    private void prepareNewTurn(FlowContext context, String userMessage) {
+        context.setCurrentNodeIndex(0);
+        context.setTemplateCode(null);
+        context.setStatus("running");
+        context.setCurrentMessage(userMessage);
+
+        context.getParams().clear();
+        context.getParams().put("_current_message", userMessage);
+        context.getMetadata().clear();
+    }
+
+    private void appendConversationTurn(FlowContext context, String userMessage, NodeResult result) {
+        if (context == null || userMessage == null || userMessage.isBlank()) {
+            return;
+        }
+
+        context.addUserMessage(userMessage);
+
+        if (result == null) {
+            return;
+        }
+
+        String assistantMessage = null;
+        if (result.isNeedMoreInput() && result.getPrompt() != null && !result.getPrompt().isBlank()) {
+            assistantMessage = result.getPrompt();
+        } else if (result.getOutput() != null && !result.getOutput().isBlank()
+                && !"流程已结束".equals(result.getOutput())) {
+            assistantMessage = result.getOutput();
+        } else if (!result.isSuccess() && result.getUserMessage() != null && !result.getUserMessage().isBlank()) {
+            assistantMessage = result.getUserMessage();
+        }
+
+        if (assistantMessage != null) {
+            context.addAssistantMessage(assistantMessage);
         }
     }
 
@@ -185,8 +226,12 @@ public class FlowEngine implements IFlowEngine {
         return switch (routeResult.getRouteType()) {
             case FIXED_TEMPLATE -> executeFixedTemplateStreaming(routeResult.getTemplateCode(), context, onChunk);
             case DYNAMIC_PLAN -> executeDynamicPlanStreaming(context, onChunk);
-            case DIRECT_ANSWER -> executeDirectAnswerStreaming(context, onChunk);
-            case FALLBACK -> executeFallbackStreaming(context, onChunk);
+            case DIRECT_ANSWER -> routeResult.isRequiresKnowledgeRetrieval()
+                    ? executeKnowledgeThenLlmStreaming(context, onChunk)
+                    : executeDirectAnswerStreaming(context, onChunk);
+            case FALLBACK -> routeResult.isRequiresKnowledgeRetrieval()
+                    ? executeKnowledgeThenLlmStreaming(context, onChunk)
+                    : executeFallbackStreaming(context, onChunk);
         };
     }
 
@@ -325,7 +370,6 @@ public class FlowEngine implements IFlowEngine {
 
         context.setStatus("completed");
         contextManager.saveContext(context);
-        contextManager.clearContext(context.getUserId());
 
         return NodeResult.completed();
     }
@@ -343,8 +387,8 @@ public class FlowEngine implements IFlowEngine {
         }
 
         try {
-            java.util.Map<String, Object> config = new java.util.HashMap<>();
-            config.put("systemPrompt", "你是一个友好的AI助手，请根据用户的问题给出有帮助的回答。");
+            Map<String, Object> config = new HashMap<>();
+            config.put("systemPrompt", buildDefaultPromptWithKnowledge(context, null));
 
             NodeResult result;
             if (executor instanceof LlmCallExecutor) {
@@ -358,7 +402,6 @@ public class FlowEngine implements IFlowEngine {
 
             context.setStatus("completed");
             contextManager.saveContext(context);
-            contextManager.clearContext(context.getUserId());
 
             return result;
 
@@ -383,9 +426,13 @@ public class FlowEngine implements IFlowEngine {
             // 动态规划：简单场景，LLM 自动选择节点组合
             case DYNAMIC_PLAN -> executeDynamicPlan(context);
             // 直接回答：简单问答，无需复杂流程
-            case DIRECT_ANSWER -> executeDirectAnswer(context);
+            case DIRECT_ANSWER -> routeResult.isRequiresKnowledgeRetrieval()
+                    ? executeKnowledgeThenLlm(context)
+                    : executeDirectAnswer(context);
             // 兜底：无法匹配时的默认处理
-            case FALLBACK -> executeFallback(context);
+            case FALLBACK -> routeResult.isRequiresKnowledgeRetrieval()
+                    ? executeKnowledgeThenLlm(context)
+                    : executeFallback(context);
         };
     }
 
@@ -577,7 +624,6 @@ public class FlowEngine implements IFlowEngine {
         // 所有节点执行完毕
         context.setStatus("completed");
         contextManager.saveContext(context);
-        contextManager.clearContext(context.getUserId());
 
         return NodeResult.completed();
     }
@@ -646,7 +692,6 @@ public class FlowEngine implements IFlowEngine {
         // 流程完成
         context.setStatus("completed");
         contextManager.saveContext(context);
-        contextManager.clearContext(context.getUserId());
 
         return lastResult != null ? lastResult : NodeResult.completed();
     }
@@ -723,8 +768,8 @@ public class FlowEngine implements IFlowEngine {
 
         try {
             // 构建默认配置
-            java.util.Map<String, Object> config = new java.util.HashMap<>();
-            config.put("systemPrompt", "你是一个友好的AI助手，请根据用户的问题给出有帮助的回答。");
+            Map<String, Object> config = new HashMap<>();
+            config.put("systemPrompt", buildDefaultPromptWithKnowledge(context, null));
 
             // 执行 LLM 调用
             NodeResult result = executor.execute(context, config);
@@ -732,7 +777,6 @@ public class FlowEngine implements IFlowEngine {
             // 流程结束
             context.setStatus("completed");
             contextManager.saveContext(context);
-            contextManager.clearContext(context.getUserId());
 
             return result;
 
@@ -740,6 +784,67 @@ public class FlowEngine implements IFlowEngine {
             log.error("默认 LLM 调用异常: {}", e.getMessage());
             return NodeResult.fail("AI 服务暂时繁忙，请稍后再试", "LLM_ERROR");
         }
+    }
+
+    /**
+     * 问答路径：先知识检索，再调用 LLM（非流式）
+     */
+    private NodeResult executeKnowledgeThenLlm(FlowContext context) {
+        executeKnowledgeRetrievalForAnswer(context);
+        return executeDefaultLLMCall(context);
+    }
+
+    /**
+     * 问答路径：先知识检索，再调用 LLM（流式）
+     */
+    private NodeResult executeKnowledgeThenLlmStreaming(FlowContext context, Consumer<String> onChunk) {
+        executeKnowledgeRetrievalForAnswer(context);
+        return executeDefaultLLMCallStreaming(context, onChunk);
+    }
+
+    /**
+     * 执行知识检索，并把检索结果写入上下文参数
+     */
+    private void executeKnowledgeRetrievalForAnswer(FlowContext context) {
+        NodeExecutor knowledgeExecutor = nodeRegistryService.getExecutor("knowledge_retrieval");
+        if (knowledgeExecutor == null) {
+            return;
+        }
+
+        try {
+            Map<String, Object> config = new HashMap<>();
+            config.put("keyword", context.getCurrentMessage());
+            config.put("searchType", "vector");
+            config.put("topK", 5);
+
+            NodeResult retrievalResult = knowledgeExecutor.execute(context, config);
+            if (retrievalResult != null && retrievalResult.getParams() != null) {
+                context.getParams().putAll(retrievalResult.getParams());
+            }
+        } catch (Exception e) {
+            log.debug("知识检索执行失败，降级为直接回答: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 构建默认系统提示词，优先注入知识检索摘要
+     */
+    private String buildDefaultPromptWithKnowledge(FlowContext context, NodeResult retrievalResult) {
+        String basePrompt = "你是一个友好的AI助手，请根据用户的问题给出有帮助的回答。";
+
+        String knowledgeSummary = null;
+        if (context != null && context.getParams() != null && context.getParams().get("knowledge_summary") != null) {
+            knowledgeSummary = String.valueOf(context.getParams().get("knowledge_summary"));
+        } else if (retrievalResult != null && retrievalResult.getOutput() != null) {
+            knowledgeSummary = retrievalResult.getOutput();
+        }
+
+        if (knowledgeSummary == null || knowledgeSummary.isBlank()) {
+            return basePrompt;
+        }
+
+        return basePrompt + "\n\n请优先依据下面检索到的知识回答；若知识不足以支撑结论，请明确说明不确定性：\n"
+                + knowledgeSummary;
     }
 
     /**

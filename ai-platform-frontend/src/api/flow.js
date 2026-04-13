@@ -75,9 +75,13 @@ export const chatStream = (message, sessionId) => {
 /**
  * 获取对话上下文
  */
-export const getChatContext = () => request.get('/flow/chat/context')
+export const getChatContext = (sessionId) => request.get('/flow/chat/context', {
+  params: { sessionId }
+})
 
 /**
  * 清除对话上下文
  */
-export const clearChatContext = () => request.delete('/flow/chat/context')
+export const clearChatContext = (sessionId) => request.delete('/flow/chat/context', {
+  params: { sessionId }
+})

@@ -37,14 +37,32 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="modelName" label="模型标识" min-width="180">
+        <el-table-column label="模型标识" min-width="240">
           <template #default="{ row }">
-            <code class="model-code">{{ row.modelName }}</code>
+            <div class="model-code-pair">
+              <div>
+                <span class="pair-label">Chat</span>
+                <code class="model-code">{{ row.modelName || '-' }}</code>
+              </div>
+              <div>
+                <span class="pair-label">Embedding</span>
+                <code class="model-code">{{ row.embeddingModelName || (row.modelName ? '同上' : '-') }}</code>
+              </div>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column prop="apiUrl" label="API地址" min-width="250" show-overflow-tooltip>
+        <el-table-column label="API地址" min-width="320" show-overflow-tooltip>
           <template #default="{ row }">
-            <span class="api-url">{{ row.apiUrl || '使用默认地址' }}</span>
+            <div class="api-pair">
+              <div>
+                <span class="pair-label">Chat</span>
+                <span class="api-url">{{ row.apiUrl || '使用默认地址' }}</span>
+              </div>
+              <div>
+                <span class="pair-label">Embedding</span>
+                <span class="api-url">{{ row.embeddingApiUrl || row.apiUrl || '自动补齐 /embeddings' }}</span>
+              </div>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="参数配置" width="160" align="center">
@@ -361,6 +379,19 @@ onMounted(() => {
     background: #f5f7fa;
     padding: 2px 6px;
     border-radius: 4px;
+  }
+
+  .model-code-pair,
+  .api-pair {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .pair-label {
+    font-size: 12px;
+    color: #909399;
+    margin-right: 6px;
   }
 
   .api-url {

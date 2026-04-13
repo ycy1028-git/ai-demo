@@ -110,12 +110,20 @@ public class KnowledgeItemController {
     }
 
     /**
+     * 重建知识索引并生成向量
+     */
+    @PostMapping("/{id}/index")
+    public Result<Void> index(@PathVariable String id) {
+        knowledgeItemService.revectorize(id);
+        return Result.ok();
+    }
+
+    /**
      * 批量向量化
      */
     @PostMapping("/vectorize-all")
-    public Result<Void> vectorizeAll(@RequestParam String kbId) {
-        knowledgeItemService.vectorizeAll(kbId);
-        return Result.ok();
+    public Result<Map<String, Object>> vectorizeAll(@RequestParam String kbId) {
+        return Result.ok(knowledgeItemService.vectorizeAll(kbId));
     }
 
     /**

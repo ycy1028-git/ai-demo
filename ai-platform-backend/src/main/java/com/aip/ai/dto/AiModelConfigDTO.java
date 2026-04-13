@@ -44,6 +44,14 @@ public class AiModelConfigDTO {
     @Size(max = 100, message = "模型标识不能超过100字符")
     private String modelName;
 
+    @Schema(description = "Embedding 接口地址", example = "https://api.openai.com/v1/embeddings")
+    @Size(max = 500, message = "Embedding接口地址不能超过500字符")
+    private String embeddingApiUrl;
+
+    @Schema(description = "Embedding 模型标识", example = "text-embedding-3-large")
+    @Size(max = 100, message = "Embedding模型标识不能超过100字符")
+    private String embeddingModelName;
+
     @Schema(description = "温度参数", example = "0.7")
     @DecimalMin(value = "0.0", message = "温度参数最小值为0")
     @DecimalMax(value = "2.0", message = "温度参数最大值为2")

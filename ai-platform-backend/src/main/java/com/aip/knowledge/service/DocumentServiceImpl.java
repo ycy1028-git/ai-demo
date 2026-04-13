@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -74,10 +75,12 @@ public class DocumentServiceImpl implements IDocumentService {
 
         String minioPath = generateMinioPath(kbId, originalName);
 
+        String bucketName = resolveBucketName(knowledgeBase);
+
         try {
             minioClient.putObject(
                     PutObjectArgs.builder()
-                            .bucket(minioConfig.getBucketName())
+                            .bucket(bucketName)
                             .object(minioPath)
                             .stream(file.getInputStream(), file.getSize(), -1)
                             .contentType(file.getContentType())
@@ -96,7 +99,7 @@ public class DocumentServiceImpl implements IDocumentService {
 
             document = documentMapper.save(document);
 
-            log.info("文档上传成功: {} -> {}", document.getId(), minioPath);
+            log.info("文档上传成功: {} -> bucket={}, path={}", document.getId(), bucketName, minioPath);
             return document;
 
         } catch (Exception e) {
@@ -111,13 +114,17 @@ public class DocumentServiceImpl implements IDocumentService {
         Document document = documentMapper.findById(documentId)
                 .orElseThrow(() -> new BusinessException("文档不存在"));
 
+        KnowledgeBase knowledgeBase = knowledgeBaseMapper.findById(document.getKbId())
+                .orElseThrow(() -> new BusinessException("知识库不存在"));
+        String bucketName = resolveBucketName(knowledgeBase);
+
         try {
             document.setExtractStatus(1);
             documentMapper.save(document);
 
             GetObjectResponse response = minioClient.getObject(
                     GetObjectArgs.builder()
-                            .bucket(minioConfig.getBucketName())
+                            .bucket(bucketName)
                             .object(document.getMinioPath())
                             .build()
             );
@@ -130,7 +137,7 @@ public class DocumentServiceImpl implements IDocumentService {
             document.setPageCount(estimatePageCount(text, document.getFileType()));
             documentMapper.save(document);
 
-            log.info("文档文本提取完成: {} -> {} 字符", documentId, text.length());
+            log.info("文档文本提取完成: {} -> bucket={}, {} 字符", documentId, bucketName, text.length());
             return text;
 
         } catch (Exception e) {
@@ -192,10 +199,14 @@ public class DocumentServiceImpl implements IDocumentService {
         Document document = documentMapper.findById(id)
                 .orElseThrow(() -> new BusinessException("文档不存在"));
 
+        KnowledgeBase knowledgeBase = knowledgeBaseMapper.findById(document.getKbId())
+                .orElseThrow(() -> new BusinessException("知识库不存在"));
+        String bucketName = resolveBucketName(knowledgeBase);
+
         try {
             minioClient.removeObject(
                     RemoveObjectArgs.builder()
-                            .bucket(minioConfig.getBucketName())
+                            .bucket(bucketName)
                             .object(document.getMinioPath())
                             .build()
             );
@@ -204,7 +215,7 @@ public class DocumentServiceImpl implements IDocumentService {
         }
 
         documentMapper.deleteById(id);
-        log.info("删除文档: {}", id);
+        log.info("删除文档: {} -> bucket={}", id, bucketName);
     }
 
     @Override
@@ -212,10 +223,14 @@ public class DocumentServiceImpl implements IDocumentService {
         Document document = documentMapper.findById(id)
                 .orElseThrow(() -> new BusinessException("文档不存在"));
 
+        KnowledgeBase knowledgeBase = knowledgeBaseMapper.findById(document.getKbId())
+                .orElseThrow(() -> new BusinessException("知识库不存在"));
+        String bucketName = resolveBucketName(knowledgeBase);
+
         try {
             return minioClient.getPresignedObjectUrl(
                     GetPresignedObjectUrlArgs.builder()
-                            .bucket(minioConfig.getBucketName())
+                            .bucket(bucketName)
                             .object(document.getMinioPath())
                             .expiry(3600)
                             .build()
@@ -299,6 +314,15 @@ public class DocumentServiceImpl implements IDocumentService {
         }
 
         return result;
+    }
+
+    private String resolveBucketName(KnowledgeBase knowledgeBase) {
+        if (knowledgeBase == null) {
+            return minioConfig.getBucketName();
+        }
+        return StringUtils.hasText(knowledgeBase.getBucketName())
+                ? knowledgeBase.getBucketName()
+                : minioConfig.getBucketName();
     }
 
     private String generateMinioPath(String kbId, String fileName) {

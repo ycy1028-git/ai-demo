@@ -1,6 +1,6 @@
 <template>
   <div class="knowledge-item-form-container">
-    <el-card>
+    <el-card v-loading="loading">
       <template #header>
         <div class="card-header">
           <el-button :icon="ArrowLeft" @click="handleBack">返回</el-button>
@@ -96,10 +96,12 @@
               ref="uploadRef"
               :auto-upload="false"
               :on-change="handleFileChange"
-              :on-remove="handleFileRemove"
+              :on-remove="handleUploadRemove"
               :file-list="fileList"
-              multiple
-              accept=".txt,.pdf,.doc,.docx"
+              :limit="1"
+              :multiple="false"
+              accept=".txt,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.html,.md"
+              :disabled="uploadingAttachment"
             >
               <el-button type="primary" plain>
                 <el-icon><Upload /></el-icon>
@@ -107,7 +109,7 @@
               </el-button>
               <template #tip>
                 <div class="upload-tip">
-                  支持 txt、pdf、doc、docx 格式，单个文件不超过10MB
+                  支持 txt/pdf/doc/docx/xls/xlsx/ppt/pptx/html/md，单个文件不超过100MB
                 </div>
               </template>
             </el-upload>
@@ -126,37 +128,41 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Upload, Plus } from '@element-plus/icons-vue'
+import { listAllKnowledgeBases, getKnowledgeItemDetail, createKnowledgeItem, updateKnowledgeItem, uploadDocument, deleteDocument } from '@/api/knowledge'
 
 const route = useRoute()
 const router = useRouter()
 
-// 是否为编辑模式
 const isEdit = computed(() => !!route.params.id)
 
 const formRef = ref(null)
 const submitting = ref(false)
+const loading = ref(false)
 const uploadRef = ref(null)
 const fileList = ref([])
 const tagInput = ref('')
-const tagList = ref([]) // 预留，可接入后端标签库
+const uploadingAttachment = ref(false)
+const attachment = ref(null)
+const removedDocIds = ref([])
 
-// 知识库列表
 const baseList = ref([])
 
-// 表单数据
 const form = reactive({
   baseId: '',
   title: '',
   content: '',
-  tags: [], // 标签列表（字符串数组）
-  status: 1
+  tags: [],
+  status: 1,
+  sourceDocId: '',
+  minioPath: '',
+  originalFileName: '',
+  fileType: ''
 })
 
-// 表单验证规则
 const rules = {
   baseId: [
     { required: true, message: '请选择知识库', trigger: 'change' }
@@ -170,53 +176,137 @@ const rules = {
   ]
 }
 
-// 获取详情
-async function fetchDetail() {
-  if (!isEdit.value) return
+const unwrap = (res) => res?.data ?? res
 
+function parseTags(raw) {
+  if (!raw) return []
+  if (Array.isArray(raw)) {
+    return raw.map(String)
+  }
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        return parsed.map(String)
+      }
+    } catch (e) {
+      // fall through to split
+    }
+    return raw.split(',').map(t => t.trim()).filter(Boolean)
+  }
+  return []
+}
+
+async function fetchBaseList() {
   try {
-    // 模拟数据
-    setTimeout(() => {
-      Object.assign(form, {
-        baseId: 1,
-        title: '如何创建账号',
-        content: '本文档介绍如何在平台上创建账号...',
-        tags: ['入门', '账号'],
-        status: 1
-      })
-    }, 300)
+    const res = await listAllKnowledgeBases()
+    const data = unwrap(res)
+    const list = Array.isArray(data) ? data : []
+    baseList.value = list.map(item => ({ id: item.id, name: item.name, status: item.status }))
+    if (!form.baseId) {
+      const queryBaseId = route.query.baseId
+      if (queryBaseId && baseList.value.some(item => item.id === queryBaseId)) {
+        form.baseId = queryBaseId
+      } else if (baseList.value.length > 0) {
+        form.baseId = baseList.value[0].id
+      }
+    }
+  } catch (error) {
+    ElMessage.error('获取知识库列表失败')
+  }
+}
+
+async function fetchDetail() {
+  if (!isEdit.value) {
+    if (route.query.baseId) {
+      form.baseId = route.query.baseId
+    }
+    return
+  }
+
+  loading.value = true
+  try {
+    const res = await getKnowledgeItemDetail(route.params.id)
+    const data = unwrap(res) || {}
+    form.baseId = data.kbId || form.baseId
+    form.title = data.title || ''
+    form.content = data.content || ''
+    form.tags = parseTags(data.tags)
+    form.status = data.status ?? 1
+    form.sourceDocId = data.sourceDocId || ''
+    form.minioPath = data.minioPath || ''
+    form.originalFileName = data.originalFileName || ''
+    form.fileType = data.fileType || ''
+    if (form.minioPath) {
+      attachment.value = {
+        docId: form.sourceDocId || null,
+        fileName: form.originalFileName || data.title,
+        fileType: form.fileType,
+        minioPath: form.minioPath,
+        isNew: false
+      }
+    } else {
+      attachment.value = null
+    }
+    syncFileList()
   } catch (error) {
     ElMessage.error('获取详情失败')
+  } finally {
+    loading.value = false
   }
 }
 
 // 文件变化
-function handleFileChange(file, files) {
-  fileList.value = files
-}
-
-// 移除文件
-function handleFileRemove(file, files) {
-  fileList.value = files
-}
-
-/**
- * 获取知识库列表
- */
-async function fetchBaseList() {
-  try {
-    // const res = await axios.get('/api/kb/knowledge-base/list')
-    // baseList.value = res.data
-
-    // 模拟数据
-    baseList.value = [
-      { id: 1, name: '产品帮助文档' },
-      { id: 2, name: '技术文档库' },
-      { id: 3, name: '客服话术库' }
-    ]
-  } catch (error) {
-    ElMessage.error('获取知识库列表失败')
+async function handleFileChange(uploadFile) {
+  if (!uploadFile || !uploadFile.raw) {
+    return
   }
+  if (!form.baseId) {
+    ElMessage.warning('请先选择知识库')
+    uploadRef.value?.clearFiles()
+    fileList.value = []
+    return
+  }
+
+  if (attachment.value) {
+    await handleAttachmentRemove({ silent: true })
+  }
+
+  uploadingAttachment.value = true
+  try {
+    const formData = new FormData()
+    formData.append('kbId', form.baseId)
+    formData.append('file', uploadFile.raw)
+    const res = await uploadDocument(formData)
+    const doc = unwrap(res)
+    if (!doc) {
+      throw new Error('上传返回数据为空')
+    }
+    attachment.value = {
+      docId: doc.id,
+      fileName: doc.name || doc.originalName || uploadFile.name,
+      fileType: doc.fileType,
+      minioPath: doc.minioPath,
+      isNew: true
+    }
+    form.sourceDocId = doc.id || ''
+    form.minioPath = doc.minioPath || ''
+    form.originalFileName = doc.name || doc.originalName || uploadFile.name
+    form.fileType = doc.fileType || ''
+    syncFileList()
+    ElMessage.success('文件上传成功')
+  } catch (error) {
+    console.error('上传失败:', error)
+    ElMessage.error('文件上传失败')
+    fileList.value = []
+  } finally {
+    uploadingAttachment.value = false
+    uploadRef.value?.clearFiles()
+  }
+}
+
+async function handleUploadRemove() {
+  await handleAttachmentRemove()
 }
 
 // 移除标签
@@ -243,25 +333,51 @@ function handleAddTags() {
   tagInput.value = ''
 }
 
-// 提交表单
+function normalizeTags(tags) {
+  return (tags || [])
+    .map(tag => (typeof tag === 'string' ? tag.trim() : `${tag}`).trim())
+    .filter((tag, index, arr) => tag.length > 0 && arr.indexOf(tag) === index)
+}
+
 async function handleSubmit() {
   if (!formRef.value) return
+  try {
+    await formRef.value.validate()
+  } catch (error) {
+    return
+  }
 
-  await formRef.value.validate(async (valid) => {
-    if (!valid) return
-
-    submitting.value = true
-    try {
-      // 模拟提交
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      ElMessage.success(isEdit.value ? '保存成功' : '提交成功')
-      router.push('/knowledge/item')
-    } catch (error) {
-      ElMessage.error(isEdit.value ? '保存失败' : '提交失败')
-    } finally {
-      submitting.value = false
+  submitting.value = true
+  try {
+    const payload = {
+      kbId: form.baseId,
+      title: form.title.trim(),
+      content: form.content,
+      tags: normalizeTags(form.tags),
+      status: form.status,
+      sourceDocId: form.sourceDocId || null,
+      minioPath: form.minioPath || null,
+      originalFileName: form.originalFileName || null,
+      fileType: form.fileType || null
     }
-  })
+
+    if (isEdit.value) {
+      await updateKnowledgeItem(route.params.id, payload)
+      ElMessage.success('保存成功')
+    } else {
+      await createKnowledgeItem(payload)
+      ElMessage.success('提交成功')
+    }
+    await flushRemovedDocuments()
+    if (attachment.value) {
+      attachment.value.isNew = false
+    }
+    router.push('/knowledge/item')
+  } catch (error) {
+    ElMessage.error(isEdit.value ? '保存失败' : '提交失败')
+  } finally {
+    submitting.value = false
+  }
 }
 
 // 返回列表
@@ -269,10 +385,83 @@ function handleBack() {
   router.push('/knowledge/item')
 }
 
-onMounted(() => {
-  fetchBaseList()
-  fetchDetail()
+onMounted(async () => {
+  await fetchBaseList()
+  await fetchDetail()
+  syncFileList()
 })
+
+watch(() => form.baseId, (newVal, oldVal) => {
+  if (!oldVal || !newVal || newVal === oldVal) {
+    return
+  }
+  if (attachment.value) {
+    handleAttachmentRemove({ silent: true })
+  }
+})
+
+function syncFileList() {
+  if (attachment.value) {
+    fileList.value = [{
+      name: attachment.value.fileName || '附件',
+      status: 'finished',
+      uid: attachment.value.docId || `${Date.now()}`
+    }]
+  } else {
+    fileList.value = []
+  }
+}
+
+async function handleAttachmentRemove(options = {}) {
+  const { silent = false } = options
+  if (!attachment.value) {
+    if (!silent) {
+      ElMessage.info('暂无附件')
+    }
+    fileList.value = []
+    return
+  }
+  const docId = attachment.value.docId
+  if (docId) {
+    if (attachment.value.isNew) {
+      await deleteDocumentById(docId)
+    } else if (!removedDocIds.value.includes(docId)) {
+      removedDocIds.value = [...removedDocIds.value, docId]
+    }
+  }
+  clearAttachmentState()
+  if (!silent) {
+    ElMessage.success('已移除附件')
+  }
+}
+
+function clearAttachmentState() {
+  attachment.value = null
+  form.sourceDocId = ''
+  form.minioPath = ''
+  form.originalFileName = ''
+  form.fileType = ''
+  fileList.value = []
+  uploadRef.value?.clearFiles()
+}
+
+async function deleteDocumentById(docId) {
+  if (!docId) return
+  try {
+    await deleteDocument(docId)
+  } catch (error) {
+    console.warn('删除文档失败:', error)
+  }
+}
+
+async function flushRemovedDocuments() {
+  if (removedDocIds.value.length === 0) {
+    return
+  }
+  const tasks = removedDocIds.value.map(id => deleteDocumentById(id))
+  await Promise.all(tasks)
+  removedDocIds.value = []
+}
 </script>
 
 <style lang="scss" scoped>

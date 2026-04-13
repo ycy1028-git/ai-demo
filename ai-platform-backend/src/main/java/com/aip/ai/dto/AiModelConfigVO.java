@@ -28,6 +28,12 @@ public class AiModelConfigVO {
     @Schema(description = "模型标识")
     private String modelName;
 
+    @Schema(description = "Embedding 接口地址")
+    private String embeddingApiUrl;
+
+    @Schema(description = "Embedding 模型标识")
+    private String embeddingModelName;
+
     @Schema(description = "温度参数")
     private BigDecimal temperature;
 

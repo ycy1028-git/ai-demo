@@ -99,8 +99,9 @@ public interface IKnowledgeItemService {
      * 批量向量化
      *
      * @param kbId 知识库ID（UUIDv7 无横杠字符串）
+     * @return 向量化结果统计信息
      */
-    void vectorizeAll(String kbId);
+    Map<String, Object> vectorizeAll(String kbId);
 
     /**
      * 获取向量化状态统计

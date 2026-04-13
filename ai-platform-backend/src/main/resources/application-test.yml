@@ -48,7 +48,7 @@ spring:
 
 elasticsearch:
   index-prefix: kb_test_
-  vector-dimension: 768
+  vector-dimension: 1024
   shards: 1
   replicas: 0
 
@@ -72,8 +72,8 @@ cors:
 
 ai:
   embedding:
-    model: text2vec-base-chinese
-    dimension: 768
+    model: text-embedding-v4
+    dimension: 1024
   llm:
     api-url: http://localhost:8000/v1/chat/completions
     api-key: test-key

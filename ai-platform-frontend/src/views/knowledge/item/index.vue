@@ -23,6 +23,11 @@
         border
       >
         <el-table-column type="selection" width="55" />
+        <el-table-column prop="kbId" label="知识库" width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span>{{ getBaseName(row.kbId) || '-' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
         <el-table-column prop="sourceType" label="来源" width="100" align="center">
           <template #default="{ row }">
@@ -47,10 +52,19 @@
           </template>
         </el-table-column>
         <el-table-column prop="createdAt" label="创建时间" width="160" />
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="340" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link @click="handleEdit(row)">编辑</el-button>
             <el-button type="primary" link @click="handleView(row)">查看</el-button>
+            <el-button
+              type="primary"
+              link
+              :loading="indexingIds.includes(row.id)"
+              :disabled="!row.content"
+              @click="handleIndex(row)"
+            >
+              索引
+            </el-button>
             <el-button
               v-if="row.minioPath"
               type="primary"
@@ -141,6 +155,7 @@
       <div class="knowledge-detail" v-if="currentRow">
         <el-descriptions :column="2" border>
           <el-descriptions-item label="标题">{{ currentRow.title }}</el-descriptions-item>
+          <el-descriptions-item label="知识库">{{ getBaseName(currentRow.kbId) || '-' }}</el-descriptions-item>
           <el-descriptions-item label="来源">
             <el-tag size="small" :type="currentRow.sourceType === 'document' ? 'primary' : 'info'">
               {{ currentRow.sourceType === 'document' ? '文档' : '手动' }}
@@ -204,8 +219,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Upload, UploadFilled, Loading } from '@element-plus/icons-vue'
 import SearchBar from '@/components/SearchBar.vue'
-import { getKnowledgeItemList, deleteKnowledgeItem, uploadDocument, getKnowledgeBaseList } from '@/api/knowledge'
-import axios from 'axios'
+import { getKnowledgeItemList, deleteKnowledgeItem, uploadDocument, listAllKnowledgeBases, indexKnowledgeItem } from '@/api/knowledge'
 
 const route = useRoute()
 const router = useRouter()
@@ -219,6 +233,7 @@ const previewDialogVisible = ref(false)
 const currentRow = ref(null)
 const uploadRef = ref(null)
 const fileList = ref([])
+const indexingIds = ref([])
 
 // 预览
 const previewUrl = ref('')
@@ -247,17 +262,26 @@ const searchForm = reactive({
 
 // 知识库列表
 const baseList = ref([])
+const baseMap = ref({})
+
+const unwrap = (res) => res?.data ?? res
 
 // 加载知识库列表
 async function loadBaseList() {
   try {
-    const res = await getKnowledgeBaseList({ page: 1, pageSize: 100 })
-    if (res.code === 200 && res.data) {
-      baseList.value = (res.data.list || res.data.content || []).map(item => ({
-        id: item.id,
-        name: item.name
-      }))
-    }
+    const res = await listAllKnowledgeBases()
+    const data = unwrap(res)
+    const list = Array.isArray(data) ? data : []
+    baseList.value = list
+      .filter(item => item && item.status !== 0)
+      .map(item => ({ id: item.id, name: item.name }))
+    const map = {}
+    list.forEach(item => {
+      if (item?.id) {
+        map[item.id] = item.name
+      }
+    })
+    baseMap.value = map
   } catch (error) {
     console.error('获取知识库列表失败:', error)
   }
@@ -309,6 +333,7 @@ async function fetchData() {
       const list = data.records || data.content || []
       tableData.value = list.map(item => ({
         id: item.id,
+        kbId: item.kbId,
         title: item.title,
         content: item.content || '',
         summary: item.summary || '',
@@ -361,9 +386,15 @@ function handleReset() {
   fetchData()
 }
 
+function getBaseName(id) {
+  if (!id) return ''
+  return baseMap.value[id] || ''
+}
+
 // 新建
 function handleCreate() {
-  router.push(`/knowledge/item/create?baseId=${route.query.baseId || ''}`)
+  const baseId = route.query.baseId || ''
+  router.push(baseId ? `/knowledge/item/create?baseId=${baseId}` : '/knowledge/item/create')
 }
 
 // 编辑
@@ -415,6 +446,32 @@ async function handleDelete(row) {
     fetchData()
   } catch (error) {
     console.error('删除失败:', error)
+  }
+}
+
+// 索引
+async function handleIndex(row) {
+  if (!row.content) {
+    ElMessage.warning('知识内容为空，无法建立索引')
+    return
+  }
+
+  if (indexingIds.value.includes(row.id)) {
+    return
+  }
+
+  indexingIds.value = [...indexingIds.value, row.id]
+  try {
+    await indexKnowledgeItem(row.id)
+    ElMessage.success(`知识「${row.title}」索引完成`)
+    await fetchData()
+    if (currentRow.value?.id === row.id) {
+      currentRow.value = tableData.value.find(item => item.id === row.id) || currentRow.value
+    }
+  } catch (error) {
+    console.error('索引失败:', error)
+  } finally {
+    indexingIds.value = indexingIds.value.filter(id => id !== row.id)
   }
 }
 

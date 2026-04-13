@@ -9,6 +9,13 @@ export function getKnowledgeBaseList(params) {
 }
 
 /**
+ * 获取全部知识库（用于下拉）
+ */
+export function listAllKnowledgeBases() {
+  return request.get('/kb/knowledge-base/list')
+}
+
+/**
  * 获取知识库详情
  * @param {number} id - 知识库ID
  */
@@ -39,6 +46,14 @@ export function updateKnowledgeBase(id, data) {
  */
 export function deleteKnowledgeBase(id) {
   return request.delete(`/kb/knowledge-base/${id}`)
+}
+
+/**
+ * 重建知识库索引并重新向量化
+ * @param {string} id - 知识库ID
+ */
+export function rebuildKnowledgeBaseIndex(id) {
+  return request.post(`/kb/knowledge-base/${id}/rebuild-index`)
 }
 
 /**
@@ -83,6 +98,14 @@ export function deleteKnowledgeItem(id) {
 }
 
 /**
+ * 索引知识并生成向量
+ * @param {string} id - 知识ID
+ */
+export function indexKnowledgeItem(id) {
+  return request.post(`/kb/knowledge-item/${id}/index`)
+}
+
+/**
  * 上传文档
  * @param {FormData} formData - 表单数据
  */
@@ -92,4 +115,12 @@ export function uploadDocument(formData) {
       'Content-Type': 'multipart/form-data'
     }
   })
+}
+
+/**
+ * 删除文档
+ * @param {string} id
+ */
+export function deleteDocument(id) {
+  return request.delete(`/kb/document/${id}`)
 }

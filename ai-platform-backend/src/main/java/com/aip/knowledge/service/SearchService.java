@@ -92,10 +92,10 @@ public class SearchService {
         }
 
         try {
-            // 获取知识库的ES索引名称
-            String esIndex = knowledgeBaseService.getEsIndexByCode(kbCode);
-            if (esIndex == null || esIndex.isBlank()) {
-                log.warn("未找到知识库对应的ES索引: {}", kbCode);
+            // 获取知识库向量索引名称
+            String vectorIndex = knowledgeBaseService.getVectorIndexByCode(kbCode);
+            if (vectorIndex == null || vectorIndex.isBlank()) {
+                log.warn("未找到知识库对应的向量索引: {}", kbCode);
                 return Collections.emptyList();
             }
 
@@ -103,7 +103,7 @@ public class SearchService {
             float[] queryVector = embeddingService.embed(queryText);
 
             // 执行向量搜索
-            List<String> results = elasticsearchService.similaritySearch(esIndex, queryVector, topK);
+            List<String> results = elasticsearchService.similaritySearch(vectorIndex, queryVector, topK);
             log.info("向量搜索完成: kbCode={}, 文本长度={}, 结果数={}", kbCode, queryText.length(), results.size());
             return results;
 

@@ -49,6 +49,12 @@ public class IntentRouteResult {
     /** 建议的下一步操作（可选） */
     private String nextAction;
 
+    /** 是否需要优先进行知识检索（向量/混合） */
+    private boolean requiresKnowledgeRetrieval;
+
+    /** 路由原因说明（用于调试和可观测性） */
+    private String routeReason;
+
     /**
      * 路由类型枚举
      * <p>

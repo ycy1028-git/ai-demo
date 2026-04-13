@@ -41,6 +41,8 @@ public class AiModelServiceImpl implements IAiModelService {
                     config.setProvider(vo.getProvider());
                     config.setApiUrl(vo.getApiUrl());
                     config.setModelName(vo.getModelName());
+                    config.setEmbeddingApiUrl(vo.getEmbeddingApiUrl());
+                    config.setEmbeddingModelName(vo.getEmbeddingModelName());
                     config.setTemperature(vo.getTemperature());
                     config.setMaxTokens(vo.getMaxTokens());
                     config.setEnabled(vo.getEnabled());

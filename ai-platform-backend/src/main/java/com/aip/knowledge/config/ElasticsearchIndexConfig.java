@@ -16,7 +16,7 @@ public class ElasticsearchIndexConfig {
     private String indexPrefix = "kb_";
 
     /** 向量维度 */
-    private Integer vectorDimension = 768;
+    private Integer vectorDimension = 1024;
 
     /** 索引分片数 */
     private Integer shards = 1;
@@ -25,8 +25,10 @@ public class ElasticsearchIndexConfig {
     private Integer replicas = 0;
 
     /**
-     * 生成索引名称
+     * 文本字段使用的分析器
      */
+    private String textAnalyzer = "standard";
+
     public String generateIndexName(String kbCode) {
         return indexPrefix + kbCode.toLowerCase();
     }

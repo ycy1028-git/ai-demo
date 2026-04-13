@@ -57,6 +57,15 @@ public class IntentRouterService implements IIntentRouterService {
     /** 置信度阈值：低于此值需要追问用户 */
     private static final double CONFIDENCE_THRESHOLD = 0.7;
 
+    private static final List<String> KNOWLEDGE_HINT_WORDS = List.of(
+            "制度", "规定", "政策", "手册", "文档", "流程", "说明", "怎么", "如何", "为什么", "是什么",
+            "能否", "是否", "区别", "作用", "原理", "配置", "报错", "接口", "参数", "上限", "权限"
+    );
+
+    private static final List<String> FLOW_ACTION_WORDS = List.of(
+            "提交", "创建", "发起", "审批", "报销", "请假", "工单", "新增", "删除", "修改", "更新", "办理"
+    );
+
     /**
      * 执行意图路由（入口方法）
      * <p>
@@ -101,7 +110,7 @@ public class IntentRouterService implements IIntentRouterService {
             String response = unifiedLlmService.chat(modelConfig, messages);
 
             // 解析 LLM 返回结果
-            return parseRoutingResult(response, templates);
+            return parseRoutingResult(response, templates, userMessage);
 
         } catch (Exception e) {
             log.error("意图路由异常: error={}", e.getMessage(), e);
@@ -154,6 +163,8 @@ public class IntentRouterService implements IIntentRouterService {
                         .templateName(template.getTemplateName())
                         .confidence(1.0)  // 快速匹配置信度为 1.0
                         .needMoreInput(false)
+                        .requiresKnowledgeRetrieval(false)
+                        .routeReason("命中固定模板，优先走业务流程")
                         .build())
                 .orElse(buildFallbackResult());
     }
@@ -173,11 +184,15 @@ public class IntentRouterService implements IIntentRouterService {
                         .templateName(template.getTemplateName())
                         .confidence(0.5)
                         .needMoreInput(false)
+                        .requiresKnowledgeRetrieval(true)
+                        .routeReason("兜底模板，默认尝试知识检索增强回答")
                         .build())
                 .orElse(IntentRouteResult.builder()
                         .routeType(IntentRouteResult.RouteType.DYNAMIC_PLAN)
                         .confidence(0.3)
                         .needMoreInput(false)
+                        .requiresKnowledgeRetrieval(true)
+                        .routeReason("未命中模板，动态规划场景默认尝试知识检索")
                         .build());
     }
 
@@ -269,7 +284,7 @@ public class IntentRouterService implements IIntentRouterService {
      * 3. 验证模板编码合法性
      * 4. 根据置信度决定是否需要追问
      */
-    private IntentRouteResult parseRoutingResult(String response, List<FlowTemplate> templates) {
+    private IntentRouteResult parseRoutingResult(String response, List<FlowTemplate> templates, String userMessage) {
         try {
             // 提取 JSON 字符串（可能包含其他文本）
             String jsonStr = extractJson(response);
@@ -339,6 +354,14 @@ public class IntentRouterService implements IIntentRouterService {
                     .prompt(prompt)
                     // 置信度低于阈值时，需要追问用户补充信息
                     .needMoreInput(confidence < CONFIDENCE_THRESHOLD)
+                    .requiresKnowledgeRetrieval(shouldRetrieveKnowledge(routeType,
+                            jsonNode.has("intent") ? jsonNode.get("intent").asText() : null,
+                            jsonNode.has("routeReason") && !jsonNode.get("routeReason").isNull()
+                                    ? jsonNode.get("routeReason").asText()
+                                    : userMessage))
+                    .routeReason(jsonNode.has("routeReason") && !jsonNode.get("routeReason").isNull()
+                            ? jsonNode.get("routeReason").asText()
+                            : "基于语义规则自动判定")
                     .build();
 
             log.info("路由结果: routeType={}, templateCode={}, confidence={}",
@@ -350,6 +373,29 @@ public class IntentRouterService implements IIntentRouterService {
             log.error("解析路由结果失败: {}", e.getMessage());
             return buildFallbackResult();
         }
+    }
+
+    private boolean shouldRetrieveKnowledge(IntentRouteResult.RouteType routeType, String intent, String text) {
+        if (routeType == IntentRouteResult.RouteType.FIXED_TEMPLATE) {
+            return false;
+        }
+
+        String merged = ((intent == null ? "" : intent) + " " + (text == null ? "" : text)).toLowerCase();
+
+        for (String actionWord : FLOW_ACTION_WORDS) {
+            if (merged.contains(actionWord.toLowerCase())) {
+                return false;
+            }
+        }
+
+        for (String hintWord : KNOWLEDGE_HINT_WORDS) {
+            if (merged.contains(hintWord.toLowerCase())) {
+                return true;
+            }
+        }
+
+        return routeType == IntentRouteResult.RouteType.DIRECT_ANSWER
+                || routeType == IntentRouteResult.RouteType.FALLBACK;
     }
 
     /**

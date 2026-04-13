@@ -8,11 +8,12 @@ import com.aip.flow.engine.NodeResult;
 import com.aip.flow.executor.LlmCallExecutor;
 import com.aip.flow.service.IContextManager;
 import com.aip.flow.service.IFlowEngine;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.concurrent.DelegatingSecurityContextExecutorService;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -38,7 +39,9 @@ public class ChatController {
     private final IContextManager contextManager;
     private final LlmCallExecutor llmCallExecutor;
 
-    private final ExecutorService asyncExecutor = Executors.newCachedThreadPool();
+    private final ExecutorService asyncExecutor = new DelegatingSecurityContextExecutorService(
+            Executors.newCachedThreadPool()
+    );
 
     /** SSE 连接超时时间：5分钟 */
     private static final long SSE_TIMEOUT = 300L * 1000;
@@ -50,36 +53,25 @@ public class ChatController {
      */
     @GetMapping("/stream")
     public SseEmitter chatStream(@RequestParam String message,
-                                  @RequestParam(required = false) String sessionId) {
+                                  @RequestParam(required = false) String sessionId,
+                                  HttpServletRequest request) {
 
         if (message == null || message.isBlank()) {
             throw new BusinessException("问题不能为空");
         }
 
-        String userId = getCurrentUserId();
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        log.info("收到对话请求: userId={}, message={}", userId, message);
+        String contextKey = resolveContextKey(sessionId, request);
+        log.info("收到对话请求: contextKey={}, sessionId={}, message={}", contextKey, sessionId, message);
 
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT);
-        emitter.onCompletion(() -> log.debug("SSE连接完成: userId={}", userId));
-        emitter.onTimeout(() -> log.debug("SSE连接超时: userId={}", userId));
-        emitter.onError(e -> log.debug("SSE连接错误: userId={}, error={}", userId, e.getMessage()));
+        emitter.onCompletion(() -> log.debug("SSE连接完成: contextKey={}", contextKey));
+        emitter.onTimeout(() -> log.debug("SSE连接超时: contextKey={}", contextKey));
+        emitter.onError(e -> log.debug("SSE连接错误: contextKey={}, error={}", contextKey, e.getMessage()));
 
-        final Authentication authForAsync = authentication;
         asyncExecutor.execute(() -> {
-            if (authForAsync != null) {
-                UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                        authForAsync.getPrincipal(),
-                        authForAsync.getCredentials(),
-                        authForAsync.getAuthorities()
-                );
-                authToken.setDetails(authForAsync.getDetails());
-                SecurityContextHolder.getContext().setAuthentication(authToken);
-            }
-
             try {
                 // 使用流式执行
-                NodeResult result = flowEngine.executeStreaming(userId, message, (chunk) -> {
+                NodeResult result = flowEngine.executeStreaming(contextKey, message, (chunk) -> {
                     try {
                         String json = String.format("{\"type\":\"content\",\"content\":\"%s\"}", escapeJson(chunk));
                         // 直接发送 data 格式，不使用命名事件（避免前端 fetch 解析兼容性问题）
@@ -96,7 +88,7 @@ public class ChatController {
                 emitter.complete();
 
             } catch (Exception e) {
-                log.error("对话处理异常: userId={}", userId, e);
+                log.error("对话处理异常: contextKey={}", contextKey, e);
                 handleStreamError(emitter, e);
             } finally {
                 // 流式处理完成后清除 SecurityContext
@@ -111,9 +103,10 @@ public class ChatController {
      * 获取当前对话上下文
      */
     @GetMapping("/context")
-    public Result<FlowContext> getContext() {
-        String userId = getCurrentUserId();
-        FlowContext context = contextManager.getContext(userId);
+    public Result<FlowContext> getContext(@RequestParam(required = false) String sessionId,
+                                          HttpServletRequest request) {
+        String contextKey = resolveContextKey(sessionId, request);
+        FlowContext context = contextManager.getContext(contextKey);
         return Result.ok(context);
     }
 
@@ -121,9 +114,10 @@ public class ChatController {
      * 清除对话上下文
      */
     @DeleteMapping("/context")
-    public Result<Void> clearContext() {
-        String userId = getCurrentUserId();
-        contextManager.clearContext(userId);
+    public Result<Void> clearContext(@RequestParam(required = false) String sessionId,
+                                     HttpServletRequest request) {
+        String contextKey = resolveContextKey(sessionId, request);
+        contextManager.clearContext(contextKey);
         return Result.ok();
     }
 
@@ -178,15 +172,46 @@ public class ChatController {
                 .replace("\t", "\\t");
     }
 
+    private String resolveContextKey(String sessionId, HttpServletRequest request) {
+        String authenticatedUserId = getAuthenticatedUserId();
+        if (authenticatedUserId != null) {
+            return authenticatedUserId;
+        }
+
+        if (sessionId != null && !sessionId.isBlank()) {
+            return "anon_sess_" + normalizeSessionId(sessionId);
+        }
+
+        String httpSessionId = request.getSession(true).getId();
+        return "anon_http_" + normalizeSessionId(httpSessionId);
+    }
+
+    private String normalizeSessionId(String sessionId) {
+        String trimmed = sessionId == null ? "" : sessionId.trim();
+        if (trimmed.isEmpty()) {
+            return "default";
+        }
+
+        StringBuilder normalized = new StringBuilder(trimmed.length());
+        for (char ch : trimmed.toCharArray()) {
+            if (Character.isLetterOrDigit(ch) || ch == '_' || ch == '-') {
+                normalized.append(ch);
+            } else {
+                normalized.append('_');
+            }
+        }
+        return normalized.length() == 0 ? "default" : normalized.toString();
+    }
+
     /**
-     * 获取当前用户ID
+     * 获取当前登录用户ID
      */
-    private String getCurrentUserId() {
+    private String getAuthenticatedUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.isAuthenticated()
                 && authentication.getPrincipal() instanceof LoginUser loginUser) {
             return loginUser.getUserId().toString();
         }
-        return "anon_" + System.currentTimeMillis();
+        return null;
     }
 }

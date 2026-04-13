@@ -2,7 +2,12 @@ package com.aip.flow.executor;
 
 import com.aip.flow.engine.FlowContext;
 import com.aip.flow.engine.NodeResult;
+import com.aip.knowledge.dto.KnowledgeSearchQueryDTO;
+import com.aip.knowledge.dto.KnowledgeSearchResultDTO;
+import com.aip.knowledge.dto.PageResultDTO;
+import com.aip.knowledge.service.IKnowledgeSearchService;
 import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -25,7 +30,10 @@ import java.util.*;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class KnowledgeRetrievalExecutor extends BaseNodeExecutor {
+
+    private final IKnowledgeSearchService knowledgeSearchService;
 
     /**
      * 初始化基础属性
@@ -61,8 +69,11 @@ public class KnowledgeRetrievalExecutor extends BaseNodeExecutor {
                     ? Integer.parseInt(config.get("topK").toString()) 
                     : 5;
 
+            // 检索类型：默认优先向量检索
+            String searchType = (String) config.getOrDefault("searchType", "vector");
+
             // ========== 2. 执行知识库检索 ==========
-            List<Map<String, Object>> results = searchKnowledge(keyword, kbId, topK);
+            List<Map<String, Object>> results = searchKnowledge(keyword, kbId, topK, searchType);
 
             // ========== 3. 处理检索结果 ==========
             if (results == null || results.isEmpty()) {
@@ -79,7 +90,11 @@ public class KnowledgeRetrievalExecutor extends BaseNodeExecutor {
             
             for (int i = 0; i < results.size(); i++) {
                 Map<String, Object> item = results.get(i);
-                summary.append(String.format("%d. %s\n", i + 1, item.get("title")));
+                summary.append(String.format("%d. %s", i + 1, item.get("title")));
+                if (item.get("kbName") != null) {
+                    summary.append(String.format("（知识库：%s）", item.get("kbName")));
+                }
+                summary.append("\n");
                 if (item.containsKey("content")) {
                     String content = item.get("content").toString();
                     // 限制单个结果长度，避免上下文过长
@@ -95,6 +110,8 @@ public class KnowledgeRetrievalExecutor extends BaseNodeExecutor {
             params.put("knowledge_found", true);
             params.put("knowledge_count", results.size());
             params.put("knowledge_results", results);
+            params.put("knowledge_summary", summary.toString());
+            params.put("knowledge_search_type", searchType);
 
             log.info("知识库检索成功: keyword={}, resultCount={}", keyword, results.size());
             return NodeResult.success(summary.toString(), params);
@@ -108,37 +125,46 @@ public class KnowledgeRetrievalExecutor extends BaseNodeExecutor {
     /**
      * 执行知识库搜索
      * <p>
-     * 注意：当前为模拟实现，实际项目中需调用真实的知识库检索服务
+     * 调用知识检索服务执行 ES / 向量检索
      *
      * @param keyword 检索关键词
      * @param kbId 知识库ID（可为空）
      * @param topK 返回结果数量
      * @return 检索结果列表
      */
-    private List<Map<String, Object>> searchKnowledge(String keyword, String kbId, int topK) {
+    private List<Map<String, Object>> searchKnowledge(String keyword, String kbId, int topK, String searchType) {
         // 参数校验
         if (keyword == null || keyword.isBlank()) {
             log.warn("检索关键词为空，跳过检索");
             return Collections.emptyList();
         }
 
+        KnowledgeSearchQueryDTO query = KnowledgeSearchQueryDTO.builder()
+                .keyword(keyword)
+                .kbId(kbId == null || kbId.isBlank() ? null : kbId)
+                .searchType(searchType == null || searchType.isBlank() ? "vector" : searchType)
+                .topK(topK)
+                .page(1)
+                .pageSize(topK)
+                .build();
+
+        PageResultDTO<KnowledgeSearchResultDTO> pageResult = knowledgeSearchService.search(query);
+        List<KnowledgeSearchResultDTO> records = pageResult != null && pageResult.getRecords() != null
+                ? pageResult.getRecords()
+                : Collections.emptyList();
+
         List<Map<String, Object>> results = new ArrayList<>();
-        
-        // 模拟返回一些知识条目（实际应调用 ES 或其他向量数据库）
-        Map<String, Object> result1 = new HashMap<>();
-        result1.put("id", "1");
-        result1.put("title", "常见问题解答");
-        result1.put("content", "关于系统使用的常见问题解答。您可以通过以下方式获取帮助：1. 查看用户手册；2. 联系技术支持；3. 访问官方文档。");
-        result1.put("score", 0.95);
-        results.add(result1);
-
-        Map<String, Object> result2 = new HashMap<>();
-        result2.put("id", "2");
-        result2.put("title", "功能介绍");
-        result2.put("content", "本系统提供多种 AI 能力，包括智能问答、知识检索、文档处理等功能。您可以根据需要选择合适的模块。");
-        result2.put("score", 0.85);
-        results.add(result2);
-
+        for (KnowledgeSearchResultDTO record : records) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("id", record.getId());
+            item.put("title", record.getTitle());
+            item.put("content", record.getContent());
+            item.put("summary", record.getSummary());
+            item.put("kbId", record.getKbId());
+            item.put("kbName", record.getKbName());
+            item.put("score", record.getScore());
+            results.add(item);
+        }
         return results;
     }
 }

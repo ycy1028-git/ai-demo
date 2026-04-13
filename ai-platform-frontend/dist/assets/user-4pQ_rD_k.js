@@ -1,0 +1,1 @@
+import{r as t}from"./request-BF7aGoKn.js";function u(e){return t.post("/auth/login",e)}function n(e){return t.get("/system/user",{params:e})}function o(e){return t.post("/system/user",e)}function a(e,s){return t.put(`/system/user/${e}`,s)}function i(e){return t.delete(`/system/user/${e}`)}export{o as c,i as d,n as g,u as l,a as u};

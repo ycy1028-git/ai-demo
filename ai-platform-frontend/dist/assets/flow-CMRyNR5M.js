@@ -1,0 +1,1 @@
+import{r as e}from"./request-BF7aGoKn.js";const o=t=>e.get("/flow/template",{params:t}),p=t=>e.get(`/flow/template/${t}`),s=t=>e.post("/flow/template",t),m=t=>e.put("/flow/template",t),w=t=>e.delete(`/flow/template/${t}`),u=(t,l)=>e.put(`/flow/template/${t}/status`,{status:l}),c=t=>e.post(`/flow/template/${t}/publish`);export{u as a,p as b,s as c,w as d,o as g,c as p,m as u};

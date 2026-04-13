@@ -68,8 +68,8 @@
 
           <!-- 消息列表 -->
           <div
-            v-for="(msg, index) in messages"
-            :key="index"
+            v-for="msg in messages"
+            :key="msg.id"
             :class="['message-item', msg.role]"
           >
             <div class="message-avatar">
@@ -84,8 +84,12 @@
               </div>
 
               <div class="message-content">
-                <!-- 消息内容 -->
-                <div v-html="formatMessage(msg.content)"></div>
+                <div v-if="msg.loading && !msg.content" class="thinking-dots">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+                <div v-else v-html="formatMessage(msg.content)"></div>
               </div>
 
               <!-- 参考来源 -->
@@ -125,8 +129,10 @@
               :rows="3"
               :autosize="{ minRows: 1, maxRows: 5 }"
               placeholder="请输入您的问题，按 Enter 发送，Shift+Enter 换行..."
-              @keydown.enter.exact.prevent="handleSend"
-              @keydown.enter.shift.exact.prevent="handleNewline"
+              @keydown.enter.exact.prevent="handleSend($event)"
+              @keydown.enter.shift.exact.prevent="handleNewline($event)"
+              @compositionstart="handleCompositionStart"
+              @compositionend="handleCompositionEnd"
               resize="none"
             />
             <div class="input-actions">
@@ -147,7 +153,7 @@
                   type="primary"
                   :loading="sending"
                   :disabled="!inputMessage.trim()"
-                  @click="handleSend"
+                  @click="handleSend()"
                 >
                   <el-icon v-if="!sending"><Promotion /></el-icon>
                   {{ sending ? '生成中...' : '发送' }}
@@ -166,7 +172,7 @@
       :size="dialogWidth"
       direction="rtl"
     >
-      <div v-if="currentCitation" class="detail-content">
+          <div v-if="currentCitation" class="detail-content">
         <div class="detail-header">
           <el-tag type="primary" effect="dark">{{ currentCitation.kbName }}</el-tag>
           <h2>{{ currentCitation.title }}</h2>
@@ -186,7 +192,7 @@
         <el-divider />
 
         <div class="detail-body">
-          <div class="content-text" v-html="currentCitation.content"></div>
+          <div class="content-text" v-html="formatDetailContent(currentCitation.content)"></div>
         </div>
 
         <div class="detail-actions">
@@ -228,7 +234,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import {
   User, Service, Delete, Refresh, Document, Files, View, CopyDocument,
   Promotion, InfoFilled, ChatDotRound, Link, QuestionFilled, VideoPause
@@ -242,7 +248,19 @@ const sending = ref(false)
 const isGenerating = ref(false)
 const messages = ref([])
 const messagesRef = ref(null)
+const sessionId = ref(createSessionId())
 let abortController = null
+let messageIdSeed = 0
+const isComposing = ref(false)
+
+function createSessionId() {
+  return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function createMessageId() {
+  messageIdSeed += 1
+  return `msg_${Date.now()}_${messageIdSeed}`
+}
 
 // 功能卡片
 const featureCards = [
@@ -273,12 +291,16 @@ const dialogWidth = computed(() => {
 
 // 刷新会话
 function refreshSession() {
+  stopGeneration({ silent: true })
   messages.value = []
+  sessionId.value = createSessionId()
 }
 
 // 清空对话
 function clearChat() {
+  stopGeneration({ silent: true })
   messages.value = []
+  sessionId.value = createSessionId()
 }
 
 // 滚动到底部
@@ -291,18 +313,24 @@ function scrollToBottom() {
 }
 
 // 停止生成
-function stopGeneration() {
+function stopGeneration(options = {}) {
+  const { silent = false } = options
   if (abortController) {
     abortController.abort()
     abortController = null
   }
   isGenerating.value = false
   sending.value = false
-  ElMessage.info('已停止生成')
+  if (!silent) {
+    ElMessage.info('已停止生成')
+  }
 }
 
 // 发送消息
-async function handleSend() {
+async function handleSend(event) {
+  if ((event && event.isComposing) || isComposing.value) {
+    return
+  }
   if (!inputMessage.value.trim()) {
     ElMessage.warning('请输入内容')
     return
@@ -317,6 +345,7 @@ async function handleSend() {
 
   // 添加用户消息
   messages.value.push({
+    id: createMessageId(),
     role: 'user',
     content: userMessage,
     createTime: new Date().toISOString()
@@ -326,6 +355,7 @@ async function handleSend() {
   // 添加助手消息占位
   const assistantIndex = messages.value.length
   messages.value.push({
+    id: createMessageId(),
     role: 'assistant',
     content: '',
     loading: true,
@@ -343,6 +373,9 @@ async function handleSend() {
     const token = localStorage.getItem('token') || ''
     const params = new URLSearchParams()
     params.append('message', userMessage)
+    if (sessionId.value) {
+      params.append('sessionId', sessionId.value)
+    }
 
     const response = await fetch(`/api/flow/chat/stream?${params.toString()}`, {
       method: 'GET',
@@ -362,6 +395,7 @@ async function handleSend() {
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let pendingContent = ''
+    let sseBuffer = ''
     let isDisplaying = false
 
     // 逐字显示内容
@@ -381,63 +415,73 @@ async function handleSend() {
       }
     }
 
+    const processSseLine = (line) => {
+      const trimmed = line.trim()
+      if (!trimmed) return
+
+      let dataStr = trimmed
+      if (trimmed.startsWith('data:')) {
+        dataStr = trimmed.slice(5).trim()
+      }
+
+      if (!dataStr.startsWith('{')) return
+
+      try {
+        const parsed = JSON.parse(dataStr)
+        if (parsed.type === 'content') {
+          pendingContent += parsed.content || ''
+          if (!isDisplaying) {
+            isDisplaying = true
+            requestAnimationFrame(displayNextChar)
+          }
+        }
+
+        if (parsed.type === 'status' && parsed.content === 'done') {
+          if (pendingContent.length > 0) {
+            messages.value[assistantIndex].content += pendingContent
+            pendingContent = ''
+          }
+          messages.value[assistantIndex].loading = false
+          sending.value = false
+          isGenerating.value = false
+        }
+
+        if (parsed.type === 'error') {
+          throw new Error(parsed.content || '请求失败')
+        }
+      } catch (e) {
+        if (e instanceof SyntaxError) {
+          console.debug('[流式] 解析SSE数据未完成，等待下一片段', dataStr)
+          return
+        }
+        throw e
+      }
+    }
+
     const processStream = async ({ done, value }) => {
       if (done || abortController.signal.aborted) {
+        sseBuffer += decoder.decode()
+        if (sseBuffer.trim()) {
+          processSseLine(sseBuffer)
+          sseBuffer = ''
+        }
+
         // 显示完剩余内容
         if (pendingContent.length > 0) {
           messages.value[assistantIndex].content += pendingContent
+          pendingContent = ''
         }
         messages.value[assistantIndex].loading = false
         return
       }
 
-      const chunk = decoder.decode(value, { stream: true })
-      console.log('[流式] 收到 chunk:', JSON.stringify(chunk))
-      const lines = chunk.split('\n')
+      sseBuffer += decoder.decode(value, { stream: true })
+      const lines = sseBuffer.split(/\r?\n/)
+      sseBuffer = lines.pop() || ''
 
       for (const line of lines) {
         if (abortController.signal.aborted) break
-
-        const trimmed = line.trim()
-        console.log('[流式] 处理行:', JSON.stringify(trimmed))
-        let dataStr = trimmed
-        // 兼容两种格式：1. data:{"type":"content"...}  2. {"type":"content"...}
-        if (trimmed.startsWith('data:')) {
-          dataStr = trimmed.slice(5).trim()
-        }
-        console.log('[流式] dataStr:', JSON.stringify(dataStr))
-        // 宽松检查：允许以 { 开头，或直接是 JSON
-        if (dataStr.startsWith('{')) {
-          try {
-            const parsed = JSON.parse(dataStr)
-            console.log('[流式] 解析成功:', parsed)
-            if (parsed.type === 'content') {
-              pendingContent += parsed.content || ''
-              console.log('[流式] pendingContent 累计:', pendingContent)
-              if (!isDisplaying) {
-                isDisplaying = true
-                requestAnimationFrame(displayNextChar)
-              }
-            }
-            if (parsed.type === 'status') {
-              if (parsed.content === 'done') {
-                console.log('[流式] 收到 done，pendingContent:', pendingContent)
-                // 显示完剩余内容
-                if (pendingContent.length > 0) {
-                  messages.value[assistantIndex].content += pendingContent
-                  pendingContent = ''
-                }
-                messages.value[assistantIndex].loading = false
-                sending.value = false
-                isGenerating.value = false
-              }
-            }
-          } catch (e) {
-            console.error('[流式] 解析SSE数据失败:', e, dataStr)
-          }
-        } else if (dataStr !== '') {
-          console.log('[流式] 非JSON数据，跳过:', dataStr)
-        }
+        processSseLine(line)
       }
 
       if (!abortController.signal.aborted) {
@@ -448,12 +492,20 @@ async function handleSend() {
     await reader.read().then(processStream)
 
   } catch (error) {
+    if (error.name === 'AbortError') {
+      if (messages.value[assistantIndex]) {
+        messages.value[assistantIndex].loading = false
+      }
+      return
+    }
+
     console.error('发送失败:', error)
+
     if (messages.value[assistantIndex]) {
-      messages.value[assistantIndex].content = '抱歉，发生了错误，请稍后重试'
+      messages.value[assistantIndex].content = error.message || '抱歉，发生了错误，请稍后重试'
       messages.value[assistantIndex].loading = false
     }
-    ElMessage.error('发送消息失败')
+    ElMessage.error(error.message || '发送消息失败')
   } finally {
     sending.value = false
     isGenerating.value = false
@@ -463,6 +515,9 @@ async function handleSend() {
 
 // 换行
 function handleNewline(e) {
+  if ((e && e.isComposing) || isComposing.value) {
+    return
+  }
   const textarea = e.target
   const start = textarea.selectionStart
   const end = textarea.selectionEnd
@@ -479,16 +534,40 @@ function askQuestion(question) {
   handleSend()
 }
 
+function handleCompositionStart() {
+  isComposing.value = true
+}
+
+function handleCompositionEnd() {
+  isComposing.value = false
+}
+
 // 格式化消息
 function formatMessage(content) {
   if (!content) return ''
+
+  let formatted = escapeHtml(content)
   // 处理换行
-  let formatted = content.replace(/\n/g, '<br>')
+  formatted = formatted.replace(/\n/g, '<br>')
   // 处理代码块
   formatted = formatted.replace(/```(\w*)\n?([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
   // 处理行内代码
   formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>')
   return formatted
+}
+
+function formatDetailContent(content) {
+  if (!content) return ''
+  return escapeHtml(content).replace(/\n/g, '<br>')
+}
+
+function escapeHtml(content) {
+  return content
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
 
 // 格式化时间
@@ -501,7 +580,7 @@ function formatTime(timeStr) {
 // 查看引用
 async function viewCitation(cite) {
   try {
-    const res = await request.get(`/api/knowledge/detail/${cite.id}`)
+    const res = await request.get(`/knowledge/detail/${cite.id}`)
     if (res.data.code === 200) {
       currentCitation.value = {
         ...res.data.data,
@@ -524,7 +603,7 @@ async function previewDocument(item) {
   }
 
   try {
-    const res = await request.get(`/api/knowledge/document/preview/${item.sourceDocId}`)
+    const res = await request.get(`/knowledge/document/preview/${item.sourceDocId}`)
     if (res.data.code === 200) {
       previewUrl.value = res.data.data
       previewDialogVisible.value = true

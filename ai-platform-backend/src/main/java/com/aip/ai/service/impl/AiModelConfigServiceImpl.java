@@ -216,6 +216,8 @@ public class AiModelConfigServiceImpl implements IAiModelConfigService {
         // API Key 加密存储
         config.setApiKey(ApiKeyEncryptUtil.encrypt(dto.getApiKey()));
         config.setModelName(dto.getModelName());
+        config.setEmbeddingApiUrl(dto.getEmbeddingApiUrl());
+        config.setEmbeddingModelName(dto.getEmbeddingModelName());
         config.setTemperature(dto.getTemperature());
         config.setMaxTokens(dto.getMaxTokens());
         // enabled 与 status 同步
@@ -242,6 +244,8 @@ public class AiModelConfigServiceImpl implements IAiModelConfigService {
             existing.setApiKey(ApiKeyEncryptUtil.encrypt(dto.getApiKey()));
         }
         existing.setModelName(dto.getModelName());
+        existing.setEmbeddingApiUrl(dto.getEmbeddingApiUrl());
+        existing.setEmbeddingModelName(dto.getEmbeddingModelName());
         existing.setTemperature(dto.getTemperature());
         existing.setMaxTokens(dto.getMaxTokens());
         // enabled 与 status 同步
@@ -268,6 +272,8 @@ public class AiModelConfigServiceImpl implements IAiModelConfigService {
         vo.setApiUrl(config.getApiUrl());
         // 不返回API密钥
         vo.setModelName(config.getModelName());
+        vo.setEmbeddingApiUrl(config.getEmbeddingApiUrl());
+        vo.setEmbeddingModelName(config.getEmbeddingModelName());
         vo.setTemperature(config.getTemperature());
         vo.setMaxTokens(config.getMaxTokens());
         // 使用实体的 enabled 字段
@@ -279,4 +285,5 @@ public class AiModelConfigServiceImpl implements IAiModelConfigService {
         vo.setUpdateTime(config.getUpdateTime());
         return vo;
     }
+
 }

@@ -32,6 +32,11 @@ public interface KnowledgeBaseMapper extends JpaRepository<KnowledgeBase, String
     Optional<KnowledgeBase> findByEsIndex(String esIndex);
 
     /**
+     * 根据向量索引名查询
+     */
+    Optional<KnowledgeBase> findByVectorIndex(String vectorIndex);
+
+    /**
      * 根据ES索引名查询（未删除）
      */
     @Query("SELECT k FROM KnowledgeBase k WHERE k.esIndex = :esIndex AND k.deleted = false")

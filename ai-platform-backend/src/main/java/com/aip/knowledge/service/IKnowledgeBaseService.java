@@ -56,6 +56,14 @@ public interface IKnowledgeBaseService {
     String getEsIndexByCode(String code);
 
     /**
+     * 根据编码获取知识库的向量索引名称
+     *
+     * @param code 知识库编码
+     * @return 向量索引名称
+     */
+    String getVectorIndexByCode(String code);
+
+    /**
      * 创建知识库
      *
      * @param dto 创建参数

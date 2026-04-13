@@ -30,9 +30,17 @@ public class KnowledgeBase extends BusinessEntity {
     @Column(nullable = false, length = 100)
     private String esIndex;
 
+    /** 向量索引名 */
+    @Column(length = 100)
+    private String vectorIndex;
+
     /** OSS存储路径前缀 */
     @Column(length = 255)
     private String ossPathPrefix = "documents/";
+
+    /** MinIO 桶名称 */
+    @Column(length = 100)
+    private String bucketName;
 
     /**
      * 关联的AI大模型配置ID
