@@ -61,16 +61,34 @@ spring:
   elasticsearch:
     uris: http://localhost:9200
 
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+
+  # QQ 邮箱 SMTP 配置
+  mail:
+    host: smtp.qq.com
+    port: 587
+    username: 1102127861@qq.com
+    password: gafzeqxbtavrhdfg
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          connectiontimeout: 5000
+          timeout: 3000
+          writetimeout: 5000
+    default-encoding: UTF-8
+
 elasticsearch:
   index-prefix: kb_
   vector-dimension: 1024
   shards: 1
   replicas: 0
-
-  servlet:
-    multipart:
-      max-file-size: 100MB
-      max-request-size: 100MB
 
 minio:
   endpoint: http://localhost:9000
@@ -113,6 +131,13 @@ kb:
     include-summary: true
     include-tags: true
     include-document-metadata: true
+  preview:
+    converter-mode: docker
+    libreoffice-bin: soffice
+    convert-timeout-seconds: 120
+    docker-container-name: ai-platform-libreoffice
+    shared-host-dir: /Users/ycy/work/docker-container/libreOffice/storage
+    shared-container-dir: /storage
 
 logging:
   level:

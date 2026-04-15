@@ -111,6 +111,12 @@
                 <div class="upload-tip">
                   支持 txt/pdf/doc/docx/xls/xlsx/ppt/pptx/html/md，单个文件不超过100MB
                 </div>
+                <div class="upload-tip">
+                  保存后会将附件内容写入 ES 字段 file.content 并参与向量检索
+                </div>
+                <div v-if="attachment" class="attachment-actions">
+                  <el-button type="primary" link size="small" @click="handlePreviewAttachment">预览附件</el-button>
+                </div>
               </template>
             </el-upload>
           </div>
@@ -309,6 +315,18 @@ async function handleUploadRemove() {
   await handleAttachmentRemove()
 }
 
+function handlePreviewAttachment() {
+  if (!attachment.value?.docId) {
+    ElMessage.warning('暂无可预览附件')
+    return
+  }
+  const query = { docId: attachment.value.docId }
+  if (isEdit.value && route.params.id) {
+    query.itemId = route.params.id
+  }
+  router.push({ path: '/knowledge/document/preview', query })
+}
+
 // 移除标签
 function handleRemoveTag(index) {
   form.tags.splice(index, 1)
@@ -361,18 +379,21 @@ async function handleSubmit() {
       fileType: form.fileType || null
     }
 
+    let targetId = route.params.id
     if (isEdit.value) {
-      await updateKnowledgeItem(route.params.id, payload)
+      const res = await updateKnowledgeItem(route.params.id, payload)
+      targetId = (unwrap(res) || {}).id || route.params.id
       ElMessage.success('保存成功')
     } else {
-      await createKnowledgeItem(payload)
+      const res = await createKnowledgeItem(payload)
+      targetId = (unwrap(res) || {}).id
       ElMessage.success('提交成功')
     }
     await flushRemovedDocuments()
     if (attachment.value) {
       attachment.value.isNew = false
     }
-    router.push('/knowledge/item')
+    router.push(targetId ? `/knowledge/item/detail/${targetId}` : '/knowledge/item')
   } catch (error) {
     ElMessage.error(isEdit.value ? '保存失败' : '提交失败')
   } finally {

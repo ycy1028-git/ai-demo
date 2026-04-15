@@ -150,14 +150,26 @@ public class FlowEngine implements IFlowEngine {
         context.setCurrentMessage(userMessage);
         context.setTemplateCode(routeResult.getTemplateCode());
         context.setStatus(routeResult.isNeedMoreInput() ? "waiting" : "running");
+        context.setMetadata("intent", routeResult.getIntent());
+        context.setMetadata("next_action", routeResult.getNextAction());
+        context.setMetadata("requires_knowledge", routeResult.isRequiresKnowledgeRetrieval());
+
+        log.info("路由决策: routeType={}, nextAction={}, requiresKnowledge={}, needMoreInput={}, prompt={}",
+                routeResult.getRouteType(), routeResult.getNextAction(), routeResult.isRequiresKnowledgeRetrieval(),
+                routeResult.isNeedMoreInput(), routeResult.getPrompt());
 
         if (routeResult.getParams() != null) {
             context.getParams().putAll(routeResult.getParams());
         }
         context.getParams().put("_current_message", userMessage);
 
-        if (routeResult.isNeedMoreInput()) {
-            return NodeResult.needInput(routeResult.getPrompt());
+        boolean hasNextAction = routeResult.getNextAction() != null && !routeResult.getNextAction().isBlank();
+        if (routeResult.isNeedMoreInput() && !hasNextAction) {
+            String prompt = routeResult.getPrompt();
+            if (prompt == null || prompt.isBlank()) {
+                prompt = "请补充更多信息，便于我继续处理您的请求。";
+            }
+            return NodeResult.needInput(prompt);
         }
 
         return executeByRouteType(routeResult, context);
@@ -169,14 +181,27 @@ public class FlowEngine implements IFlowEngine {
         context.setCurrentMessage(userMessage);
         context.setTemplateCode(routeResult.getTemplateCode());
         context.setStatus(routeResult.isNeedMoreInput() ? "waiting" : "running");
+        context.setMetadata("intent", routeResult.getIntent());
+        context.setMetadata("next_action", routeResult.getNextAction());
+        context.setMetadata("requires_knowledge", routeResult.isRequiresKnowledgeRetrieval());
+
+        log.info("路由决策(流式): routeType={}, nextAction={}, requiresKnowledge={}, needMoreInput={}, prompt={}",
+                routeResult.getRouteType(), routeResult.getNextAction(), routeResult.isRequiresKnowledgeRetrieval(),
+                routeResult.isNeedMoreInput(), routeResult.getPrompt());
 
         if (routeResult.getParams() != null) {
             context.getParams().putAll(routeResult.getParams());
         }
         context.getParams().put("_current_message", userMessage);
 
-        if (routeResult.isNeedMoreInput()) {
-            return NodeResult.needInput(routeResult.getPrompt());
+        boolean hasNextAction = routeResult.getNextAction() != null && !routeResult.getNextAction().isBlank();
+        if (routeResult.isNeedMoreInput() && !hasNextAction) {
+            String prompt = routeResult.getPrompt();
+            if (prompt == null || prompt.isBlank()) {
+                prompt = "请补充更多信息，便于我继续处理您的请求。";
+            }
+            onChunk.accept(prompt);
+            return NodeResult.needInput(prompt);
         }
 
         return executeByRouteTypeStreaming(routeResult, context, onChunk);
@@ -223,6 +248,10 @@ public class FlowEngine implements IFlowEngine {
      * 根据路由类型流式执行
      */
     private NodeResult executeByRouteTypeStreaming(IntentRouteResult routeResult, FlowContext context, Consumer<String> onChunk) {
+        if (routeResult.getNextAction() != null && !routeResult.getNextAction().isBlank()) {
+            return executeDynamicPlanStreaming(context, onChunk);
+        }
+
         return switch (routeResult.getRouteType()) {
             case FIXED_TEMPLATE -> executeFixedTemplateStreaming(routeResult.getTemplateCode(), context, onChunk);
             case DYNAMIC_PLAN -> executeDynamicPlanStreaming(context, onChunk);
@@ -262,6 +291,41 @@ public class FlowEngine implements IFlowEngine {
      */
     private NodeResult executeDynamicPlanStreaming(FlowContext context, Consumer<String> onChunk) {
         log.info("执行动态规划(流式)");
+
+        // 优先执行路由给出的内部节点动作
+        NodeResult directNodeResult = executeNextActionNodeStreaming(context, onChunk);
+        if (directNodeResult != null) {
+            return directNodeResult;
+        }
+
+        // 邮件对话优先尝试邮件节点（支持分步补全参数）
+        if (shouldTryEmailNode(context)) {
+            log.info("检测到邮件对话意图，尝试执行邮件发送(流式)");
+            NodeExecutor emailExecutor = nodeRegistryService.getExecutor("email_send");
+            if (emailExecutor != null) {
+                try {
+                    NodeResult result = emailExecutor.execute(context, new HashMap<>());
+                    if (result.getOutput() != null) {
+                        onChunk.accept(result.getOutput());
+                    }
+                    if (result.isNeedMoreInput() && result.getPrompt() != null && !result.getPrompt().isBlank()) {
+                        onChunk.accept(result.getPrompt());
+                    }
+                    if (result.isNeedMoreInput()) {
+                        context.setStatus("waiting");
+                    } else {
+                        context.setStatus("completed");
+                    }
+                    contextManager.saveContext(context);
+                    return result;
+                } catch (Exception e) {
+                    log.error("邮件发送失败(流式): {}", e.getMessage());
+                    onChunk.accept("邮件发送失败，请稍后再试");
+                    return NodeResult.fail("邮件发送失败", "EMAIL_ERROR");
+                }
+            }
+        }
+
         return executeDefaultLLMCallStreaming(context, onChunk);
     }
 
@@ -290,9 +354,40 @@ public class FlowEngine implements IFlowEngine {
      */
     private NodeResult continueExecutionStreaming(FlowContext context, Consumer<String> onChunk) {
         String templateCode = context.getTemplateCode();
+        
+        // 如果有模板，继续执行固定模板
         if (templateCode != null) {
             return executeFixedTemplateStreaming(templateCode, context, onChunk);
         }
+
+        // 检查是否有完整邮件参数
+        Map<String, Object> params = context.getParams();
+        if (params.containsKey("to") && params.containsKey("subject") && params.containsKey("content")) {
+            NodeExecutor emailExecutor = nodeRegistryService.getExecutor("email_send");
+            if (emailExecutor != null) {
+                try {
+                    NodeResult result = emailExecutor.execute(context, new HashMap<>());
+                    if (result.getOutput() != null) {
+                        onChunk.accept(result.getOutput());
+                    }
+                    if (result.isNeedMoreInput() && result.getPrompt() != null && !result.getPrompt().isBlank()) {
+                        onChunk.accept(result.getPrompt());
+                    }
+                    if (result.isNeedMoreInput()) {
+                        context.setStatus("waiting");
+                        contextManager.saveContext(context);
+                    } else {
+                        context.setStatus("completed");
+                        contextManager.saveContext(context);
+                    }
+                    return result;
+                } catch (Exception e) {
+                    log.error("继续执行邮件节点失败(流式): {}", e.getMessage());
+                    onChunk.accept("邮件发送失败，请稍后再试");
+                }
+            }
+        }
+
         return executeDynamicPlanStreaming(context, onChunk);
     }
 
@@ -331,7 +426,7 @@ public class FlowEngine implements IFlowEngine {
                     }
                 }
 
-                result = processNodeResult(context, definition, result);
+                result = processNodeResult(context, definition, result, node.getType());
 
                 if (result.isNeedMoreInput() || "completed".equals(result.getStatus())) {
                     return result;
@@ -420,6 +515,10 @@ public class FlowEngine implements IFlowEngine {
      * @return 节点执行结果
      */
     private NodeResult executeByRouteType(IntentRouteResult routeResult, FlowContext context) {
+        if (routeResult.getNextAction() != null && !routeResult.getNextAction().isBlank()) {
+            return executeDynamicPlan(context);
+        }
+
         return switch (routeResult.getRouteType()) {
             // 固定模板：复杂业务场景，使用预设的节点流程
             case FIXED_TEMPLATE -> executeFixedTemplate(routeResult.getTemplateCode(), context);
@@ -487,6 +586,33 @@ public class FlowEngine implements IFlowEngine {
     private NodeResult executeDynamicPlan(FlowContext context) {
         log.info("执行动态规划");
 
+        // 优先执行路由给出的内部节点动作
+        NodeResult directNodeResult = executeNextActionNode(context);
+        if (directNodeResult != null) {
+            return directNodeResult;
+        }
+
+        // 邮件对话优先尝试邮件节点（支持分步补全参数）
+        if (shouldTryEmailNode(context)) {
+            log.info("检测到邮件对话意图，尝试执行邮件发送");
+            NodeExecutor emailExecutor = nodeRegistryService.getExecutor("email_send");
+            if (emailExecutor != null) {
+                try {
+                    NodeResult result = emailExecutor.execute(context, new HashMap<>());
+                    if (result.isNeedMoreInput()) {
+                        context.setStatus("waiting");
+                    } else {
+                        context.setStatus("completed");
+                    }
+                    contextManager.saveContext(context);
+                    return result;
+                } catch (Exception e) {
+                    log.error("邮件发送失败: {}", e.getMessage());
+                    return NodeResult.fail("邮件发送失败: " + e.getMessage(), "EMAIL_ERROR");
+                }
+            }
+        }
+
         // 生成节点执行计划
         NodeExecutionPlan plan = dynamicPlannerService.plan(context.getCurrentMessage(), context);
         if (plan == null || plan.isEmpty()) {
@@ -528,14 +654,122 @@ public class FlowEngine implements IFlowEngine {
      */
     private NodeResult continueExecution(FlowContext context) {
         String templateCode = context.getTemplateCode();
-
+        
         // 如果有模板，继续执行固定模板
         if (templateCode != null) {
             return executeFixedTemplate(templateCode, context);
         }
 
+        // 邮件对话优先尝试邮件节点（支持分步补全参数）
+        if (shouldTryEmailNode(context)) {
+            NodeExecutor emailExecutor = nodeRegistryService.getExecutor("email_send");
+            if (emailExecutor != null) {
+                try {
+                    NodeResult result = emailExecutor.execute(context, new HashMap<>());
+                    if (result.isNeedMoreInput()) {
+                        context.setStatus("waiting");
+                        contextManager.saveContext(context);
+                    } else {
+                        context.setStatus("completed");
+                        contextManager.saveContext(context);
+                    }
+                    return result;
+                } catch (Exception e) {
+                    log.error("继续执行邮件节点失败: {}", e.getMessage());
+                }
+            }
+        }
+
         // 无模板，执行动态规划
         return executeDynamicPlan(context);
+    }
+
+    private NodeResult executeNextActionNode(FlowContext context) {
+        String nextAction = (String) context.getMetadata("next_action");
+        if (nextAction == null || nextAction.isBlank()) {
+            return null;
+        }
+
+        NodeExecutor executor = nodeRegistryService.getExecutor(nextAction);
+        if (executor == null) {
+            return null;
+        }
+
+        try {
+            NodeResult result = executor.execute(context, new HashMap<>());
+            if (result.isNeedMoreInput()) {
+                context.setMetadata("last_node_type", nextAction);
+                context.setStatus("waiting");
+            } else {
+                context.setStatus("completed");
+            }
+            contextManager.saveContext(context);
+            return result;
+        } catch (Exception e) {
+            log.error("执行 nextAction 节点失败: nodeType={}, error={}", nextAction, e.getMessage());
+            return NodeResult.fail("内部操作执行失败", "NEXT_ACTION_ERROR");
+        }
+    }
+
+    private NodeResult executeNextActionNodeStreaming(FlowContext context, Consumer<String> onChunk) {
+        String nextAction = (String) context.getMetadata("next_action");
+        if (nextAction == null || nextAction.isBlank()) {
+            return null;
+        }
+
+        NodeExecutor executor = nodeRegistryService.getExecutor(nextAction);
+        if (executor == null) {
+            return null;
+        }
+
+        try {
+            NodeResult result = executor.execute(context, new HashMap<>());
+            if (result.getOutput() != null) {
+                onChunk.accept(result.getOutput());
+            }
+            if (result.isNeedMoreInput() && result.getPrompt() != null && !result.getPrompt().isBlank()) {
+                onChunk.accept(result.getPrompt());
+            }
+            if (result.isNeedMoreInput()) {
+                context.setMetadata("last_node_type", nextAction);
+                context.setStatus("waiting");
+            } else {
+                context.setStatus("completed");
+            }
+            contextManager.saveContext(context);
+            return result;
+        } catch (Exception e) {
+            log.error("流式执行 nextAction 节点失败: nodeType={}, error={}", nextAction, e.getMessage());
+            onChunk.accept("内部操作执行失败，请稍后重试");
+            return NodeResult.fail("内部操作执行失败", "NEXT_ACTION_ERROR");
+        }
+    }
+
+    private boolean shouldTryEmailNode(FlowContext context) {
+        if (context == null) {
+            return false;
+        }
+
+        Object lastNodeType = context.getMetadata("last_node_type");
+        if ("email_send".equals(lastNodeType)) {
+            return true;
+        }
+
+        Map<String, Object> params = context.getParams();
+        if (params != null && (params.containsKey("to") || params.containsKey("subject") || params.containsKey("content"))) {
+            return true;
+        }
+
+        String message = context.getCurrentMessage();
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+
+        return message.contains("邮件")
+                || message.contains("邮箱")
+                || message.contains("发给")
+                || message.contains("发送给")
+                || message.contains("@");
     }
 
     /**
@@ -577,7 +811,7 @@ public class FlowEngine implements IFlowEngine {
             try {
                 // 执行节点
                 NodeResult result = executor.execute(context, node.getData());
-                result = processNodeResult(context, definition, result);
+                result = processNodeResult(context, definition, result, node.getType());
 
                 // 需要更多输入，暂停流程
                 if (result.isNeedMoreInput() || "completed".equals(result.getStatus())) {
@@ -664,6 +898,8 @@ public class FlowEngine implements IFlowEngine {
 
                 // 需要更多输入
                 if (result.isNeedMoreInput()) {
+                    // 记录当前节点类型，用于继续执行时识别
+                    context.setMetadata("last_node_type", nodeType);
                     context.setStatus("waiting");
                     contextManager.saveContext(context);
                     return result;
@@ -704,12 +940,14 @@ public class FlowEngine implements IFlowEngine {
      * - 执行失败：返回失败结果
      * - 执行成功：继续下一节点
      */
-    private NodeResult processNodeResult(FlowContext context, FlowDefinition definition, NodeResult result) {
+    private NodeResult processNodeResult(FlowContext context, FlowDefinition definition, NodeResult result, String nodeType) {
         if (result == null) {
             return NodeResult.skip("节点执行结果为空");
         }
 
         if (result.isNeedMoreInput()) {
+            // 记录当前节点类型，用于继续执行时识别
+            context.setMetadata("last_node_type", nodeType);
             context.setStatus("waiting");
             contextManager.saveContext(context);
             return result;

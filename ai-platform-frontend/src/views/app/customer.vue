@@ -240,6 +240,7 @@ import {
   Promotion, InfoFilled, ChatDotRound, Link, QuestionFilled, VideoPause
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { handleAuthError } from '@/api/request'
 import request from '@/utils/request'
 
 // 状态
@@ -371,6 +372,10 @@ async function handleSend(event) {
 
     // 流式模式：调用真实 API
     const token = localStorage.getItem('token') || ''
+    if (!token) {
+      handleAuthError('请先登录')
+      return
+    }
     const params = new URLSearchParams()
     params.append('message', userMessage)
     if (sessionId.value) {
@@ -387,6 +392,10 @@ async function handleSend(event) {
     })
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        handleAuthError('登录已过期，请重新登录')
+        return
+      }
       throw new Error('请求失败')
     }
 

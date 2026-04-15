@@ -10,7 +10,7 @@
     <!-- 操作按钮 -->
     <div class="table-operations">
       <el-button type="primary" :icon="Plus" @click="handleCreate">添加知识</el-button>
-      <el-button :icon="Upload" @click="uploadDialogVisible = true">批量上传</el-button>
+      <el-button :icon="Upload" @click="openUploadDialog">批量上传</el-button>
       <el-button :icon="Refresh" @click="fetchData">刷新</el-button>
     </div>
 
@@ -28,11 +28,22 @@
             <span>{{ getBaseName(row.kbId) || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-button type="primary" link @click="handleView(row)">{{ row.title }}</el-button>
+          </template>
+        </el-table-column>
         <el-table-column prop="sourceType" label="来源" width="100" align="center">
           <template #default="{ row }">
             <el-tag size="small" :type="row.sourceType === 'document' ? 'primary' : 'info'">
               {{ row.sourceType === 'document' ? '文档' : '手动' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="附件索引" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.sourceDocId ? 'success' : 'info'">
+              {{ row.sourceDocId ? 'file.content' : '无附件' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -123,7 +134,7 @@
             :auto-upload="false"
             :limit="10"
             :on-exceed="handleExceed"
-            :file-list="fileList"
+            v-model:file-list="fileList"
             drag
             multiple
             accept=".txt,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.html,.md"
@@ -146,70 +157,6 @@
       </template>
     </el-dialog>
 
-    <!-- 查看详情对话框 -->
-    <el-dialog
-      v-model="viewDialogVisible"
-      title="知识详情"
-      width="800px"
-    >
-      <div class="knowledge-detail" v-if="currentRow">
-        <el-descriptions :column="2" border>
-          <el-descriptions-item label="标题">{{ currentRow.title }}</el-descriptions-item>
-          <el-descriptions-item label="知识库">{{ getBaseName(currentRow.kbId) || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="来源">
-            <el-tag size="small" :type="currentRow.sourceType === 'document' ? 'primary' : 'info'">
-              {{ currentRow.sourceType === 'document' ? '文档' : '手动' }}
-            </el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="状态">
-            <el-tag :type="currentRow.status === 1 ? 'success' : 'info'">
-              {{ currentRow.status === 1 ? '启用' : '禁用' }}
-            </el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="向量化">
-            <el-tag size="small" :type="getVectorStatusType(currentRow.vectorStatus)">
-              {{ getVectorStatusText(currentRow.vectorStatus) }}
-            </el-tag>
-            <span v-if="currentRow.vectorChunks" style="margin-left: 8px;">
-              ({{ currentRow.vectorChunks }} 个分块)
-            </span>
-          </el-descriptions-item>
-          <el-descriptions-item label="创建时间">{{ currentRow.createdAt }}</el-descriptions-item>
-          <el-descriptions-item label="关联文件" v-if="currentRow.minioPath">
-            <el-button type="primary" link size="small" @click="handlePreview(currentRow)">
-              预览
-            </el-button>
-            <el-button type="primary" link size="small" @click="handleDownload(currentRow)">
-              下载
-            </el-button>
-          </el-descriptions-item>
-          <el-descriptions-item label="内容" :span="2">
-            <div class="content-box">{{ currentRow.content }}</div>
-          </el-descriptions-item>
-        </el-descriptions>
-      </div>
-    </el-dialog>
-
-    <!-- 预览对话框 -->
-    <el-dialog
-      v-model="previewDialogVisible"
-      title="文件预览"
-      width="900px"
-      top="5vh"
-    >
-      <div class="preview-container">
-        <iframe
-          v-if="previewUrl"
-          :src="previewUrl"
-          class="preview-iframe"
-          frameborder="0"
-        />
-        <div v-else class="preview-loading">
-          <el-icon class="is-loading"><Loading /></el-icon>
-          <span>正在加载预览...</span>
-        </div>
-      </div>
-    </el-dialog>
   </div>
 </template>
 
@@ -217,9 +164,17 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Upload, UploadFilled, Loading } from '@element-plus/icons-vue'
+import { Plus, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
 import SearchBar from '@/components/SearchBar.vue'
-import { getKnowledgeItemList, deleteKnowledgeItem, uploadDocument, listAllKnowledgeBases, indexKnowledgeItem } from '@/api/knowledge'
+import {
+  getKnowledgeItemList,
+  deleteKnowledgeItem,
+  uploadDocument,
+  createKnowledgeItemFromDocument,
+  listAllKnowledgeBases,
+  indexKnowledgeItem,
+  getKnowledgeItemDownloadInfo
+} from '@/api/knowledge'
 
 const route = useRoute()
 const router = useRouter()
@@ -228,15 +183,9 @@ const router = useRouter()
 const loading = ref(false)
 const uploading = ref(false)
 const uploadDialogVisible = ref(false)
-const viewDialogVisible = ref(false)
-const previewDialogVisible = ref(false)
-const currentRow = ref(null)
 const uploadRef = ref(null)
 const fileList = ref([])
 const indexingIds = ref([])
-
-// 预览
-const previewUrl = ref('')
 
 // 搜索字段配置
 const searchFields = [
@@ -339,6 +288,7 @@ async function fetchData() {
         summary: item.summary || '',
         tags: item.tags || [],
         sourceType: item.sourceType || 'manual',
+        sourceDocId: item.sourceDocId || '',
         minioPath: item.minioPath || item.ossPath || null,
         originalFileName: item.originalFileName || item.fileName || null,
         fileType: item.fileType || null,
@@ -404,32 +354,27 @@ function handleEdit(row) {
 
 // 查看
 function handleView(row) {
-  currentRow.value = row
-  viewDialogVisible.value = true
+  router.push(`/knowledge/item/detail/${row.id}`)
 }
 
 // 预览
 async function handlePreview(row) {
-  try {
-    loading.value = true
-    previewUrl.value = 'https://www.w3.org/WAI/WCAG21/Techniques/pdf/img/table-word.jpg'
-    previewDialogVisible.value = true
-  } catch (error) {
-    ElMessage.error('获取预览链接失败')
-  } finally {
-    loading.value = false
-  }
+  const query = row.sourceDocId ? { docId: row.sourceDocId, itemId: row.id } : { itemId: row.id }
+  router.push({ path: '/knowledge/document/preview', query })
 }
 
 // 下载
 async function handleDownload(row) {
   try {
-    loading.value = true
-    ElMessage.success(`开始下载: ${row.originalFileName || row.title}`)
+    const res = await getKnowledgeItemDownloadInfo(row.id)
+    const data = unwrap(res)
+    if (!data?.downloadUrl) {
+      ElMessage.warning('未获取到下载链接')
+      return
+    }
+    window.open(data.downloadUrl, '_blank')
   } catch (error) {
     ElMessage.error('获取下载链接失败')
-  } finally {
-    loading.value = false
   }
 }
 
@@ -465,9 +410,6 @@ async function handleIndex(row) {
     await indexKnowledgeItem(row.id)
     ElMessage.success(`知识「${row.title}」索引完成`)
     await fetchData()
-    if (currentRow.value?.id === row.id) {
-      currentRow.value = tableData.value.find(item => item.id === row.id) || currentRow.value
-    }
   } catch (error) {
     console.error('索引失败:', error)
   } finally {
@@ -499,23 +441,57 @@ async function handleUpload() {
     return
   }
 
-  const uploadInstance = uploadRef.value
-  if (!uploadInstance || !uploadInstance.uploadFiles || uploadInstance.uploadFiles.length === 0) {
+  if (!fileList.value || fileList.value.length === 0) {
     ElMessage.warning('请选择要上传的文件')
     return
   }
 
   uploading.value = true
   try {
-    const formData = new FormData()
-    formData.append('kbId', uploadForm.baseId)
-    uploadInstance.uploadFiles.forEach(file => {
-      formData.append('files', file.raw)
-    })
-    await uploadDocument(formData)
-    ElMessage.success('上传成功')
+    const files = fileList.value
+      .map(file => file?.raw)
+      .filter(Boolean)
+
+    let successCount = 0
+    const failedFiles = []
+
+    for (const rawFile of files) {
+      const formData = new FormData()
+      formData.append('kbId', uploadForm.baseId)
+      formData.append('file', rawFile)
+      formData.append('name', rawFile.name)
+
+      try {
+        const uploadRes = await uploadDocument(formData)
+        const doc = unwrap(uploadRes)
+        if (!doc?.id) {
+          throw new Error('上传返回文档ID为空')
+        }
+        const createRes = await createKnowledgeItemFromDocument(doc.id)
+        const item = unwrap(createRes)
+        if (!item?.id) {
+          throw new Error('创建知识返回ID为空')
+        }
+        // 双保险：创建后再触发一次显式索引，确保正文与附件(file.content)都进入索引并向量化
+        await indexKnowledgeItem(item.id)
+        successCount++
+      } catch (error) {
+        failedFiles.push(rawFile.name || '未命名文件')
+        console.error('批量上传并建知识失败:', rawFile.name, error)
+      }
+    }
+
+    if (failedFiles.length === 0) {
+      ElMessage.success(`上传并创建知识成功，共 ${successCount} 个文件`)
+    } else if (successCount > 0) {
+      ElMessage.warning(`成功 ${successCount} 个，失败 ${failedFiles.length} 个：${failedFiles.join('、')}`)
+    } else {
+      ElMessage.error(`上传失败：${failedFiles.join('、')}`)
+    }
+
     uploadDialogVisible.value = false
-    uploadRef.value.clearFiles()
+    uploadRef.value?.clearFiles()
+    fileList.value = []
     fetchData()
   } catch (error) {
     console.error('上传失败:', error)
@@ -523,6 +499,11 @@ async function handleUpload() {
   } finally {
     uploading.value = false
   }
+}
+
+function openUploadDialog() {
+  uploadDialogVisible.value = true
+  fileList.value = []
 }
 
 onMounted(() => {
@@ -549,42 +530,5 @@ onMounted(() => {
     justify-content: flex-end;
   }
 
-  .content-box {
-    max-height: 200px;
-    overflow-y: auto;
-    padding: 8px;
-    background-color: #f5f7fa;
-    border-radius: 4px;
-    white-space: pre-wrap;
-    font-size: 14px;
-    line-height: 1.6;
-  }
-
-  .preview-container {
-    width: 100%;
-    height: 70vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: #f5f7fa;
-
-    .preview-iframe {
-      width: 100%;
-      height: 100%;
-      border-radius: 4px;
-    }
-
-    .preview-loading {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-      color: #909399;
-
-      .el-icon {
-        font-size: 32px;
-      }
-    }
-  }
 }
 </style>

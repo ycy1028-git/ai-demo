@@ -87,6 +87,14 @@ public class DocumentController {
     }
 
     /**
+     * 获取文档预览URL
+     */
+    @GetMapping("/{id}/preview-url")
+    public Result<String> getPreviewUrl(@PathVariable String id) {
+        return Result.ok(documentService.getPreviewUrl(id));
+    }
+
+    /**
      * 提取文档文本（Tika解析）
      */
     @PostMapping("/{id}/extract")

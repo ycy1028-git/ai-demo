@@ -287,7 +287,8 @@ public class KnowledgeSearchServiceImpl implements IKnowledgeSearchService {
             KnowledgeSearchResultDTO dto = new KnowledgeSearchResultDTO();
             dto.setId(getStringValue(result, "id"));
             dto.setTitle(getStringValue(result, "title"));
-            dto.setContent(getStringValue(result, "content"));
+            dto.setContent(resolveResultContent(result));
+            dto.setFileContent(getNestedStringValue(result, "file", "content"));
             dto.setSummary(getStringValue(result, "summary"));
             if (resolvedKb != null) {
                 dto.setKbId(resolvedKb.getId());
@@ -349,6 +350,24 @@ public class KnowledgeSearchServiceImpl implements IKnowledgeSearchService {
     private String getStringValue(Map<String, Object> map, String key) {
         Object value = map.get(key);
         return value != null ? value.toString() : null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private String getNestedStringValue(Map<String, Object> map, String parentKey, String childKey) {
+        Object parent = map.get(parentKey);
+        if (!(parent instanceof Map<?, ?> nested)) {
+            return null;
+        }
+        Object value = ((Map<String, Object>) nested).get(childKey);
+        return value != null ? value.toString() : null;
+    }
+
+    private String resolveResultContent(Map<String, Object> map) {
+        String content = getStringValue(map, "content");
+        if (content != null && !content.isBlank()) {
+            return content;
+        }
+        return getNestedStringValue(map, "file", "content");
     }
 
     private Double getDoubleValue(Map<String, Object> map, String key) {

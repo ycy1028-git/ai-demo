@@ -8,6 +8,7 @@ import io.minio.http.Method;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.net.URLEncoder;
 import java.util.HashMap;
@@ -34,7 +35,11 @@ public class MinioFileService {
      * @return 预览URL
      */
     public String generatePreviewUrl(String minioPath, int expirySeconds) {
-        return generateUrl(minioPath, Method.GET, expirySeconds);
+        return generateUrl(minioPath, null, Method.GET, expirySeconds);
+    }
+
+    public String generatePreviewUrl(String minioPath, String bucketName, int expirySeconds) {
+        return generateUrl(minioPath, bucketName, Method.GET, expirySeconds);
     }
 
     /**
@@ -53,10 +58,14 @@ public class MinioFileService {
      * @return 下载URL
      */
     public String generateDownloadUrl(String minioPath, String fileName, int expirySeconds) {
+        return generateDownloadUrl(minioPath, null, fileName, expirySeconds);
+    }
+
+    public String generateDownloadUrl(String minioPath, String bucketName, String fileName, int expirySeconds) {
         try {
             String url = minioClient.getPresignedObjectUrl(
                     GetPresignedObjectUrlArgs.builder()
-                            .bucket(minioConfig.getBucketName())
+                            .bucket(resolveBucketName(bucketName))
                             .object(minioPath)
                             .method(Method.GET)
                             .expiry(expirySeconds)
@@ -79,10 +88,14 @@ public class MinioFileService {
         return generateDownloadUrl(minioPath, fileName, 3600);
     }
 
+    public String generateDownloadUrl(String minioPath, String bucketName, String fileName) {
+        return generateDownloadUrl(minioPath, bucketName, fileName, 3600);
+    }
+
     /**
      * 生成临时访问URL
      */
-    private String generateUrl(String minioPath, Method method, int expirySeconds) {
+    private String generateUrl(String minioPath, String bucketName, Method method, int expirySeconds) {
         if (minioPath == null || minioPath.isBlank()) {
             throw new BusinessException("文件路径不能为空");
         }
@@ -90,7 +103,7 @@ public class MinioFileService {
         try {
             String url = minioClient.getPresignedObjectUrl(
                     GetPresignedObjectUrlArgs.builder()
-                            .bucket(minioConfig.getBucketName())
+                            .bucket(resolveBucketName(bucketName))
                             .object(minioPath)
                             .method(method)
                             .expiry(expirySeconds)
@@ -113,5 +126,9 @@ public class MinioFileService {
         } catch (Exception e) {
             return fileName;
         }
+    }
+
+    private String resolveBucketName(String bucketName) {
+        return StringUtils.hasText(bucketName) ? bucketName : minioConfig.getBucketName();
     }
 }

@@ -54,3 +54,31 @@ export function updateUser(id, data) {
 export function deleteUser(id) {
   return request.delete(`/system/user/${id}`)
 }
+
+export function resetUserPassword(id, password) {
+  return request.put(`/system/user/${id}/password`, null, { params: { password } })
+}
+
+export function getRoleList(params) {
+  return request.get('/system/role', { params })
+}
+
+export function getAllRoles() {
+  return request.get('/system/role/list')
+}
+
+export function createRole(data) {
+  return request.post('/system/role', data)
+}
+
+export function updateRole(id, data) {
+  return request.put(`/system/role/${id}`, data)
+}
+
+export function deleteRole(id) {
+  return request.delete(`/system/role/${id}`)
+}
+
+export function getMenuPermissionOptions() {
+  return request.get('/system/role/menu-options')
+}

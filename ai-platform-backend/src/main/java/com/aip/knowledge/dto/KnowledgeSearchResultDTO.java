@@ -25,6 +25,9 @@ public class KnowledgeSearchResultDTO {
     /** 知识内容 */
     private String content;
 
+    /** 附件内容（索引字段：file.content） */
+    private String fileContent;
+
     /** 摘要 */
     private String summary;
 

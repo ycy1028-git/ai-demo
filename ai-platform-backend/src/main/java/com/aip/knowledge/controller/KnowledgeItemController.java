@@ -2,7 +2,10 @@ package com.aip.knowledge.controller;
 
 import com.aip.common.result.Result;
 import com.aip.knowledge.dto.KnowledgeItemDTO;
+import com.aip.knowledge.entity.KnowledgeBase;
 import com.aip.knowledge.entity.KnowledgeItem;
+import com.aip.knowledge.mapper.KnowledgeBaseMapper;
+import com.aip.knowledge.service.IDocumentService;
 import com.aip.knowledge.service.IKnowledgeItemService;
 import com.aip.knowledge.service.MinioFileService;
 import jakarta.validation.Valid;
@@ -27,6 +30,12 @@ public class KnowledgeItemController {
 
     @Autowired
     private MinioFileService minioFileService;
+
+    @Autowired
+    private KnowledgeBaseMapper knowledgeBaseMapper;
+
+    @Autowired
+    private IDocumentService documentService;
 
     /**
      * 分页查询知识条目
@@ -147,11 +156,22 @@ public class KnowledgeItemController {
             return Result.fail("该知识条目无关联文件");
         }
 
-        String previewUrl = minioFileService.generatePreviewUrl(item.getMinioPath());
-        String downloadUrl = minioFileService.generateDownloadUrl(
-                item.getMinioPath(),
-                item.getOriginalFileName() != null ? item.getOriginalFileName() : item.getTitle()
-        );
+        String previewUrl;
+        String downloadUrl;
+        if (item.getSourceDocId() != null && !item.getSourceDocId().isBlank()) {
+            previewUrl = documentService.getPreviewUrl(item.getSourceDocId());
+            downloadUrl = documentService.getDownloadUrl(item.getSourceDocId());
+        } else {
+            KnowledgeBase knowledgeBase = knowledgeBaseMapper.findById(item.getKbId()).orElse(null);
+            String bucketName = knowledgeBase != null ? knowledgeBase.getBucketName() : null;
+            previewUrl = minioFileService.generatePreviewUrl(item.getMinioPath(), bucketName, 3600);
+            downloadUrl = minioFileService.generateDownloadUrl(
+                    item.getMinioPath(),
+                    bucketName,
+                    item.getOriginalFileName() != null ? item.getOriginalFileName() : item.getTitle(),
+                    3600
+            );
+        }
 
         Map<String, String> result = new HashMap<>();
         result.put("previewUrl", previewUrl);
@@ -175,10 +195,19 @@ public class KnowledgeItemController {
             return Result.fail("该知识条目无关联文件");
         }
 
-        String downloadUrl = minioFileService.generateDownloadUrl(
-                item.getMinioPath(),
-                item.getOriginalFileName() != null ? item.getOriginalFileName() : item.getTitle()
-        );
+        String downloadUrl;
+        if (item.getSourceDocId() != null && !item.getSourceDocId().isBlank()) {
+            downloadUrl = documentService.getDownloadUrl(item.getSourceDocId());
+        } else {
+            KnowledgeBase knowledgeBase = knowledgeBaseMapper.findById(item.getKbId()).orElse(null);
+            String bucketName = knowledgeBase != null ? knowledgeBase.getBucketName() : null;
+            downloadUrl = minioFileService.generateDownloadUrl(
+                    item.getMinioPath(),
+                    bucketName,
+                    item.getOriginalFileName() != null ? item.getOriginalFileName() : item.getTitle(),
+                    3600
+            );
+        }
 
         Map<String, String> result = new HashMap<>();
         result.put("downloadUrl", downloadUrl);

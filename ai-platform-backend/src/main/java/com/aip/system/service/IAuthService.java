@@ -2,7 +2,6 @@ package com.aip.system.service;
 
 import com.aip.system.dto.LoginDTO;
 import com.aip.system.dto.LoginVO;
-import com.aip.system.entity.SysUser;
 import jakarta.servlet.http.HttpServletRequest;
 
 import java.util.List;
@@ -35,7 +34,7 @@ public interface IAuthService {
      * @param token 用户令牌
      * @return 当前用户
      */
-    SysUser getCurrentUser(String token);
+    LoginVO getCurrentUser(String token);
 
     /**
      * 获取当前用户活动列表

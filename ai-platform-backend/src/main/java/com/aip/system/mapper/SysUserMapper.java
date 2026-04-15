@@ -64,6 +64,8 @@ public interface SysUserMapper extends JpaRepository<SysUser, String> {
     @Query("SELECT u FROM SysUser u WHERE u.deleted = false")
     java.util.List<SysUser> findAllActive();
 
+    long countByRoleId(String roleId);
+
     /**
      * 更新登录信息（跳过乐观锁版本检查）
      * 用于登录时记录最后登录时间和IP

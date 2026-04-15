@@ -105,6 +105,14 @@ export function indexKnowledgeItem(id) {
   return request.post(`/kb/knowledge-item/${id}/index`)
 }
 
+export function getKnowledgeItemPreviewInfo(id) {
+  return request.get(`/kb/knowledge-item/${id}/preview`)
+}
+
+export function getKnowledgeItemDownloadInfo(id) {
+  return request.get(`/kb/knowledge-item/${id}/download`)
+}
+
 /**
  * 上传文档
  * @param {FormData} formData - 表单数据
@@ -118,9 +126,29 @@ export function uploadDocument(formData) {
 }
 
 /**
+ * 从文档创建知识条目
+ * @param {string} docId
+ */
+export function createKnowledgeItemFromDocument(docId) {
+  return request.post(`/kb/document/${docId}/create-knowledge-item`)
+}
+
+/**
  * 删除文档
  * @param {string} id
  */
 export function deleteDocument(id) {
   return request.delete(`/kb/document/${id}`)
+}
+
+export function getDocumentDetail(id) {
+  return request.get(`/kb/document/${id}`)
+}
+
+export function getDocumentPreviewUrl(id) {
+  return request.get(`/kb/document/${id}/preview-url`)
+}
+
+export function getDocumentDownloadUrl(id) {
+  return request.get(`/kb/document/${id}/download-url`)
 }

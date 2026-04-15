@@ -5,7 +5,9 @@ import com.aip.common.security.JwtUtil;
 import com.aip.common.utils.PasswordEncoder;
 import com.aip.system.dto.LoginDTO;
 import com.aip.system.dto.LoginVO;
+import com.aip.system.entity.SysRole;
 import com.aip.system.entity.SysUser;
+import com.aip.system.mapper.SysRoleMapper;
 import com.aip.system.mapper.SysUserMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -16,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -31,6 +34,12 @@ public class AuthServiceImpl implements IAuthService {
 
     @Autowired
     private JwtUtil jwtUtil;
+
+    @Autowired
+    private SysRoleMapper sysRoleMapper;
+
+    @Autowired
+    private SysRoleServiceImpl sysRoleService;
 
     @Override
     @Transactional
@@ -56,19 +65,32 @@ public class AuthServiceImpl implements IAuthService {
         vo.setUserId(user.getId());
         vo.setUsername(user.getUsername());
         vo.setRealName(user.getRealName());
+        fillRoleInfo(vo, user);
 
         return vo;
     }
 
     @Override
     public void logout(String token) {
-        jwtUtil.removeToken(token);
+        jwtUtil.removeToken(normalizeToken(token));
     }
 
     @Override
-    public SysUser getCurrentUser(String token) {
-        String userId = jwtUtil.getUserId(token);
-        return sysUserMapper.findById(userId).orElse(null);
+    public LoginVO getCurrentUser(String token) {
+        String userId = jwtUtil.getUserId(normalizeToken(token));
+        if (userId == null || userId.isBlank()) {
+            return null;
+        }
+        SysUser user = sysUserMapper.findById(userId).orElse(null);
+        if (user == null) {
+            return null;
+        }
+        LoginVO vo = new LoginVO();
+        vo.setUserId(user.getId());
+        vo.setUsername(user.getUsername());
+        vo.setRealName(user.getRealName());
+        fillRoleInfo(vo, user);
+        return vo;
     }
 
     @Override
@@ -86,6 +108,16 @@ public class AuthServiceImpl implements IAuthService {
         return activities;
     }
 
+    private String normalizeToken(String token) {
+        if (token == null) {
+            return null;
+        }
+        if (token.startsWith("Bearer ")) {
+            return token.substring("Bearer ".length()).trim();
+        }
+        return token.trim();
+    }
+
     private String getClientIp(HttpServletRequest request) {
         String ip = request.getHeader("X-Forwarded-For");
         if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
@@ -95,5 +127,39 @@ public class AuthServiceImpl implements IAuthService {
             ip = request.getRemoteAddr();
         }
         return ip;
+    }
+
+    private void fillRoleInfo(LoginVO vo, SysUser user) {
+        if (vo == null || user == null) {
+            return;
+        }
+
+        boolean isAdmin = "admin".equalsIgnoreCase(user.getUsername());
+        vo.setAdmin(isAdmin);
+
+        if (user.getRoleId() != null && !user.getRoleId().isBlank()) {
+            SysRole role = sysRoleMapper.findById(user.getRoleId()).orElse(null);
+            if (role != null && (role.getDeleted() == null || !role.getDeleted())) {
+                vo.setRoleId(role.getId());
+                vo.setRoleCode(role.getCode());
+                vo.setRoleName(role.getName());
+                List<String> permissions = sysRoleService.parsePermissions(role.getMenuPermissions());
+                vo.setMenuPermissions(permissions);
+                if (permissions.contains(MenuPermissionCatalog.ALL) || "ADMIN".equalsIgnoreCase(role.getCode())) {
+                    isAdmin = true;
+                }
+            }
+        }
+
+        vo.setAdmin(isAdmin);
+        if (isAdmin) {
+            vo.setMenuPermissions(List.of(MenuPermissionCatalog.ALL));
+            if (vo.getRoleCode() == null) {
+                vo.setRoleCode("ADMIN");
+                vo.setRoleName("系统管理员");
+            }
+        } else if (vo.getMenuPermissions() == null) {
+            vo.setMenuPermissions(Collections.emptyList());
+        }
     }
 }

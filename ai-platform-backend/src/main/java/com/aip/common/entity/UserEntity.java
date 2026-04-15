@@ -2,6 +2,7 @@ package com.aip.common.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.MappedSuperclass;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -42,6 +43,7 @@ public abstract class UserEntity extends BusinessEntity {
      * 密码（BCrypt 加密存储）
      */
     @Column(nullable = false, length = 255)
+    @JsonIgnore
     private String password;
 
     /**

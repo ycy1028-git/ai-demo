@@ -149,6 +149,16 @@ public class DynamicPlannerService implements IDynamicPlannerService {
             sb.append("\n");
         }
 
+        if (context != null && context.getMetadata() != null && !context.getMetadata().isEmpty()) {
+            Object intent = context.getMetadata().get("intent");
+            Object nextAction = context.getMetadata().get("next_action");
+            Object requiresKnowledge = context.getMetadata().get("requires_knowledge");
+            sb.append("## 路由语义结论\n");
+            sb.append("- intent: ").append(intent).append("\n");
+            sb.append("- nextAction: ").append(nextAction).append("\n");
+            sb.append("- requiresKnowledgeRetrieval: ").append(requiresKnowledge).append("\n\n");
+        }
+
         // ========== 可用节点列表 ==========
         List<RegisteredNode> nodes = nodeRegistryService.getAllNodes();
         sb.append("## 可用节点\n");
@@ -169,7 +179,21 @@ public class DynamicPlannerService implements IDynamicPlannerService {
         sb.append("2. 需要业务数据时调用 execute 节点\n");
         sb.append("3. 询问政策/制度时先检索知识库\n");
         sb.append("4. 最终都需要 LLM 生成回答\n");
-        sb.append("5. 控制节点数量（不超过 ").append(MAX_NODES).append(" 个）\n\n");
+        sb.append("5. 控制节点数量（不超过 ").append(MAX_NODES).append(" 个）\n");
+        sb.append("6. 如用户消息已包含邮件收件人、主题、内容，直接规划 email_send 节点发送邮件\n");
+        sb.append("7. 如用户消息缺少邮件信息，用 collect 收集后再调用 email_send\n\n");
+        sb.append("8. 若 nextAction 不为空，优先执行 nextAction 对应节点\n\n");
+
+        // ========== 节点参数说明 ==========
+        sb.append("## 节点参数说明\n");
+        for (RegisteredNode node : nodes) {
+            if (node.getInputSchema() != null && node.getInputSchema().getProperties() != null) {
+                sb.append(String.format("- %s 需要参数: %s\n", 
+                    node.getCode(), 
+                    String.join(", ", node.getInputSchema().getProperties().keySet())));
+            }
+        }
+        sb.append("\n");
 
         // ========== 输出格式 ==========
         sb.append("## 输出格式\n");

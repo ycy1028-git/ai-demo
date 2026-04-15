@@ -2,6 +2,8 @@ package com.aip.system.dto;
 
 import lombok.Data;
 
+import java.util.List;
+
 /**
  * 登录响应DTO
  */
@@ -16,6 +18,16 @@ public class LoginVO {
     private String username;
 
     private String realName;
+
+    private String roleId;
+
+    private String roleCode;
+
+    private String roleName;
+
+    private Boolean admin;
+
+    private List<String> menuPermissions;
 
     private Long expireTime;
 }

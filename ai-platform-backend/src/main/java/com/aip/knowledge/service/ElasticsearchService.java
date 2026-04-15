@@ -319,10 +319,14 @@ public class ElasticsearchService {
         }
 
         try {
-            Query matchQuery = MatchQuery.of(m -> m
-                    .field("content")
-                    .query(keyword)
-            )._toQuery();
+            Query matchQuery = Query.of(q -> q
+                    .bool(b -> b
+                            .should(s -> s.match(m -> m.field("title").query(keyword)))
+                            .should(s -> s.match(m -> m.field("content").query(keyword)))
+                            .should(s -> s.match(m -> m.field("file.content").query(keyword)))
+                            .minimumShouldMatch("1")
+                    )
+            );
 
             SearchRequest searchRequest = SearchRequest.of(s -> s
                     .index(indexName)
@@ -522,13 +526,20 @@ public class ElasticsearchService {
     @SuppressWarnings("unchecked")
     private String extractContent(Map<String, Object> source) {
         Object content = source.get("content");
-        if (content != null) {
+        if (content != null && !content.toString().isBlank()) {
             return content.toString();
+        }
+        Object file = source.get("file");
+        if (file instanceof Map<?, ?> fileMap) {
+            Object fileContent = fileMap.get("content");
+            if (fileContent != null && !fileContent.toString().isBlank()) {
+                return fileContent.toString();
+            }
         }
         // 如果没有content字段，返回整个文档的字符串表示
         Object title = source.get("title");
         if (title != null) {
-            return title + ": " + content;
+            return title.toString();
         }
         return source.toString();
     }
@@ -719,6 +730,15 @@ public class ElasticsearchService {
                 "analyzer", analyzer
         ));
 
+        properties.put("file", Map.of(
+                "properties", Map.of(
+                        "docId", Map.of("type", "keyword"),
+                        "name", Map.of("type", "keyword"),
+                        "type", Map.of("type", "keyword"),
+                        "content", Map.of("type", "text", "analyzer", analyzer)
+                )
+        ));
+
 
         // 摘要
         properties.put("summary", Map.of("type", "text"));
@@ -733,6 +753,12 @@ public class ElasticsearchService {
 
         // 标签
         properties.put("tags", Map.of("type", "keyword"));
+
+        properties.put("sourceType", Map.of("type", "keyword"));
+        properties.put("sourceDocId", Map.of("type", "keyword"));
+        properties.put("originalFileName", Map.of("type", "keyword"));
+        properties.put("fileType", Map.of("type", "keyword"));
+        properties.put("chunkSource", Map.of("type", "keyword"));
 
         // 状态
         properties.put("status", Map.of("type", "integer"));

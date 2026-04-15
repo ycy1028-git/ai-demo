@@ -2,6 +2,9 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
 import { useUserStore } from '@/store'
+import { isTokenExpired } from '@/utils/token'
+
+let redirectingToLogin = false
 
 // 创建 axios 实例
 const request = axios.create({
@@ -17,6 +20,10 @@ request.interceptors.request.use(
   (config) => {
     const userStore = useUserStore()
     if (userStore.token) {
+      if (isTokenExpired(userStore.token)) {
+        handleAuthError('登录已过期，请重新登录')
+        return Promise.reject(new Error('Token expired'))
+      }
       config.headers['Authorization'] = `Bearer ${userStore.token}`
     }
     return config
@@ -68,21 +75,41 @@ request.interceptors.response.use(
 )
 
 // 处理认证错误（Token 过期或无效）
-function handleAuthError(message) {
+export function handleAuthError(message) {
+  if (redirectingToLogin) {
+    return
+  }
+
+  redirectingToLogin = true
   localStorage.removeItem('token')
+  localStorage.removeItem('userInfo')
+
   try {
     const userStore = useUserStore()
-    userStore.$reset()
+    if (typeof userStore.logout === 'function') {
+      userStore.logout()
+    } else {
+      userStore.$reset()
+    }
   } catch (e) {
     console.error('清除用户状态失败', e)
   }
-  // 使用后端返回的错误消息，如果没有则使用默认消息
+
   const errorMsg = message || '登录已过期，请重新登录'
   ElMessage.warning(errorMsg)
-  // 延迟跳转，让用户看到提示信息
-  setTimeout(() => {
-    router.push('/login')
-  }, 1500)
+
+  const currentPath = router.currentRoute.value?.fullPath || '/'
+  if (router.currentRoute.value?.path !== '/login') {
+    router.replace({
+      path: '/login',
+      query: { redirect: currentPath }
+    }).finally(() => {
+      redirectingToLogin = false
+    })
+    return
+  }
+
+  redirectingToLogin = false
 }
 
 export default request

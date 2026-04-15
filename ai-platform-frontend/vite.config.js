@@ -49,10 +49,6 @@ export default defineConfig({
         target: 'http://localhost:8080',
         changeOrigin: true
       },
-      '/expert': {
-        target: 'http://localhost:8080',
-        changeOrigin: true
-      },
       '/open': {
         target: 'http://localhost:8080',
         changeOrigin: true

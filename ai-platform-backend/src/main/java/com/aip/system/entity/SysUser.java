@@ -1,7 +1,9 @@
 package com.aip.system.entity;
 
 import com.aip.common.entity.UserEntity;
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -17,6 +19,6 @@ import lombok.Setter;
 @Entity
 @Table(name = "t_sys_user")
 public class SysUser extends UserEntity {
-    // 继承 UserEntity 的所有字段，无需重复定义
-    // 如需扩展用户专属字段，在此添加
+    @Column(length = 32)
+    private String roleId;
 }

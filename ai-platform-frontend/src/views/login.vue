@@ -77,13 +77,14 @@
 
 <script setup>
 import { ref, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock, Document, ChatDotRound, Connection } from '@element-plus/icons-vue'
 import { useUserStore } from '@/store'
 import { login } from '@/api/user'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 
 const formRef = ref(null)
@@ -118,10 +119,16 @@ async function handleLogin() {
         userId: data.userId,
         username: data.username,
         realName: data.realName,
+        roleId: data.roleId,
+        roleCode: data.roleCode,
+        roleName: data.roleName,
+        admin: !!data.admin,
         avatar: ''
       })
+      userStore.setPermissions(data.menuPermissions || [])
       ElMessage.success('登录成功')
-      router.push('/dashboard')
+      const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard'
+      router.push(redirect)
     } catch (error) {
       ElMessage.error(error.message || '登录失败')
     } finally {

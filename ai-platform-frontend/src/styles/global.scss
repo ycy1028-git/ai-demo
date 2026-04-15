@@ -483,6 +483,26 @@ html, body {
 .el-table__fixed,
 .el-table__fixed-right {
   background: $gray-50;
+
+  .el-table__fixed-header-wrapper th.el-table__cell {
+    background: $gray-100 !important;
+  }
+
+  .el-table__fixed-body-wrapper td.el-table__cell {
+    background: $gray-50 !important;
+  }
+
+  .el-table__fixed-body-wrapper .el-table__row:hover > td.el-table__cell {
+    background-color: rgba($primary-color, 0.04) !important;
+  }
+}
+
+.el-table__fixed-right {
+  box-shadow: -8px 0 12px -10px rgba(0, 0, 0, 0.25);
+}
+
+.el-table__fixed {
+  box-shadow: 8px 0 12px -10px rgba(0, 0, 0, 0.25);
 }
 
 // 对话框（亮色主题）

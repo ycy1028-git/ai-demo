@@ -83,6 +83,27 @@ services:
       timeout: 5s
       retries: 5
 
+  libreoffice:
+    image: linuxserver/libreoffice:latest
+    container_name: ai-platform-libreoffice
+    restart: unless-stopped
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: Asia/Shanghai
+      CUSTOM_USER: ${LIBREOFFICE_USER:-admin}
+      PASSWORD: ${LIBREOFFICE_PASSWORD:-admin123}
+    ports:
+      - "3010:3000"
+    volumes:
+      - /Users/ycy/work/docker-container/libreOffice/config:/config
+      - /Users/ycy/work/docker-container/libreOffice/storage:/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   mysql_data:
   mysql_conf:

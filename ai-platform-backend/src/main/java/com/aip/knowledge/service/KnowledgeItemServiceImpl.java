@@ -3,21 +3,29 @@ package com.aip.knowledge.service;
 import com.aip.common.exception.BusinessException;
 import com.aip.common.result.PageResult;
 import com.aip.knowledge.config.ElasticsearchIndexConfig;
+import com.aip.knowledge.config.MinioConfig;
 import com.aip.knowledge.dto.KnowledgeItemDTO;
 import com.aip.knowledge.entity.KnowledgeBase;
+import com.aip.knowledge.entity.Document;
 import com.aip.knowledge.entity.KnowledgeItem;
+import com.aip.knowledge.mapper.DocumentMapper;
 import com.aip.knowledge.mapper.KnowledgeBaseMapper;
 import com.aip.knowledge.mapper.KnowledgeItemMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.minio.GetObjectArgs;
+import io.minio.GetObjectResponse;
+import io.minio.MinioClient;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.tika.Tika;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import com.aip.knowledge.service.chunk.ChunkType;
 import com.aip.knowledge.service.chunk.StructuredContentChunker;
@@ -39,6 +47,15 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
     private KnowledgeBaseMapper knowledgeBaseMapper;
 
     @Autowired
+    private DocumentMapper documentMapper;
+
+    @Autowired
+    private MinioConfig minioConfig;
+
+    @Autowired
+    private MinioClient minioClient;
+
+    @Autowired
     private EmbeddingService embeddingService;
 
     @Autowired
@@ -52,6 +69,8 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
 
     @Autowired
     private StructuredContentChunker contentChunker;
+
+    private final Tika tika = new Tika();
 
     @Override
     public PageResult<KnowledgeItem> page(String kbId, String keyword, Integer status, int page, int size) {
@@ -170,6 +189,20 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
         KnowledgeItem item = knowledgeItemMapper.findById(id)
                 .orElseThrow(() -> new BusinessException("知识条目不存在"));
 
+        String sourceDocId = item.getSourceDocId();
+        Document linkedDocument = null;
+        String linkedBucketName = null;
+        if (sourceDocId != null && !sourceDocId.isBlank()) {
+            long refCount = knowledgeItemMapper.countActiveBySourceDocId(sourceDocId);
+            if (refCount <= 1) {
+                linkedDocument = documentMapper.findById(sourceDocId).orElse(null);
+                if (linkedDocument != null) {
+                    KnowledgeBase docKb = knowledgeBaseMapper.findById(linkedDocument.getKbId()).orElse(null);
+                    linkedBucketName = resolveBucketName(docKb);
+                }
+            }
+        }
+
         KnowledgeBase knowledgeBase = knowledgeBaseMapper.findById(item.getKbId())
                 .orElse(null);
 
@@ -180,6 +213,14 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
         }
 
         knowledgeItemMapper.deleteById(id);
+
+        if (linkedDocument != null && linkedBucketName != null) {
+            removeMinioObject(linkedBucketName, linkedDocument.getMinioPath());
+            removeMinioObject(linkedBucketName, buildPreviewPdfPath(linkedDocument.getMinioPath()));
+            documentMapper.deleteById(linkedDocument.getId());
+            log.info("删除知识时同步清理附件及预览: itemId={}, docId={}", id, linkedDocument.getId());
+        }
+
         log.info("删除知识条目: {}", id);
     }
 
@@ -230,10 +271,13 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
                 ));
             }
 
+            Document sourceDocument = resolveSourceDocument(item);
+            List<TextChunk> fileChunks = resolveFileChunks(item, sourceDocument);
+            int totalChunks = chunks.size() + fileChunks.size();
             List<Map<String, Object>> documents = new ArrayList<>();
+            int chunkIndex = 0;
 
-            for (int i = 0; i < chunks.size(); i++) {
-                TextChunk chunk = chunks.get(i);
+            for (TextChunk chunk : chunks) {
                 if (chunk.text() == null || chunk.text().isBlank()) {
                     continue;
                 }
@@ -249,11 +293,56 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
                 doc.put("summary", item.getSummary());
                 doc.put("tags", item.getTags());
                 doc.put("status", item.getStatus());
-                doc.put("chunkIndex", i);
-                doc.put("totalChunks", chunks.size());
+                doc.put("sourceType", item.getSourceType());
+                doc.put("sourceDocId", item.getSourceDocId());
+                doc.put("originalFileName", item.getOriginalFileName());
+                doc.put("fileType", item.getFileType());
+                doc.put("chunkIndex", chunkIndex++);
+                doc.put("totalChunks", totalChunks);
+                doc.put("chunkSource", "BODY");
                 doc.put("chunkType", chunk.primaryType().name());
                 doc.put("chunkTypes", chunk.segmentTypes().stream().map(Enum::name).toList());
                 doc.put("anchors", chunk.anchors());
+                if (sourceDocument != null) {
+                    doc.put("file", buildFileObject(sourceDocument, null));
+                }
+
+                List<Float> vectorList = new ArrayList<>();
+                for (float v : vector) {
+                    vectorList.add(v);
+                }
+                doc.put("vector", vectorList);
+
+                documents.add(doc);
+            }
+
+            for (TextChunk chunk : fileChunks) {
+                if (chunk.text() == null || chunk.text().isBlank()) {
+                    continue;
+                }
+                String chunkText = chunk.text();
+                float[] vector = embeddingService.embed(chunkText);
+                validateVectorDimension(vectorIndex, item, knowledgeBase, vector, expectedDimension);
+
+                Map<String, Object> doc = new HashMap<>();
+                doc.put("kbId", item.getKbId());
+                doc.put("itemId", item.getId());
+                doc.put("title", item.getTitle());
+                doc.put("content", null);
+                doc.put("summary", item.getSummary());
+                doc.put("tags", item.getTags());
+                doc.put("status", item.getStatus());
+                doc.put("sourceType", item.getSourceType());
+                doc.put("sourceDocId", item.getSourceDocId());
+                doc.put("originalFileName", item.getOriginalFileName());
+                doc.put("fileType", item.getFileType());
+                doc.put("chunkIndex", chunkIndex++);
+                doc.put("totalChunks", totalChunks);
+                doc.put("chunkSource", "FILE");
+                doc.put("chunkType", chunk.primaryType().name());
+                doc.put("chunkTypes", chunk.segmentTypes().stream().map(Enum::name).toList());
+                doc.put("anchors", chunk.anchors());
+                doc.put("file", buildFileObject(sourceDocument, chunkText));
 
                 List<Float> vectorList = new ArrayList<>();
                 for (float v : vector) {
@@ -271,10 +360,10 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
             }
 
             item.setVectorStatus(2);
-            item.setVectorChunks(chunks.size());
+            item.setVectorChunks(documents.size());
             knowledgeItemMapper.save(item);
 
-            log.info("向量化完成: {} -> {} chunks", item.getId(), chunks.size());
+            log.info("向量化完成: {} -> body={}, file={}, indexed={}", item.getId(), chunks.size(), fileChunks.size(), documents.size());
 
         } catch (Exception e) {
             log.error("向量化失败: {}", item.getId(), e);
@@ -425,5 +514,129 @@ public class KnowledgeItemServiceImpl implements IKnowledgeItemService {
             return vectorIndex;
         }
         return knowledgeBase.getEsIndex();
+    }
+
+    private Document resolveSourceDocument(KnowledgeItem item) {
+        if (item == null || item.getSourceDocId() == null || item.getSourceDocId().isBlank()) {
+            return null;
+        }
+        return documentMapper.findById(item.getSourceDocId()).orElse(null);
+    }
+
+    private List<TextChunk> resolveFileChunks(KnowledgeItem item, Document sourceDocument) {
+        if (sourceDocument == null) {
+            return Collections.emptyList();
+        }
+
+        String extractedText = sourceDocument.getExtractText();
+        if (extractedText == null || extractedText.isBlank()) {
+            try {
+                extractedText = extractDocumentTextFromStorage(item, sourceDocument);
+                sourceDocument = documentMapper.findById(sourceDocument.getId()).orElse(sourceDocument);
+            } catch (Exception e) {
+                throw new BusinessException(String.format(
+                        "附件文本抽取失败，无法建立 file.content 索引: itemId=%s, docId=%s",
+                        item.getId(),
+                        sourceDocument.getId()
+                ), e);
+            }
+        }
+
+        if (extractedText == null || extractedText.isBlank()) {
+            throw new BusinessException(String.format(
+                    "附件文本为空，无法建立 file.content 索引: itemId=%s, docId=%s",
+                    item.getId(),
+                    sourceDocument.getId()
+            ));
+        }
+
+        KnowledgeItem fileItem = new KnowledgeItem();
+        fileItem.setTitle(sourceDocument.getName());
+        fileItem.setContent(extractedText);
+        fileItem.setOriginalFileName(sourceDocument.getOriginalName());
+        fileItem.setFileType(sourceDocument.getFileType());
+
+        return contentChunker.chunk(fileItem);
+    }
+
+    private Map<String, Object> buildFileObject(Document sourceDocument, String fileContent) {
+        if (sourceDocument == null) {
+            return null;
+        }
+        Map<String, Object> file = new HashMap<>();
+        file.put("docId", sourceDocument.getId());
+        file.put("name", sourceDocument.getOriginalName());
+        file.put("type", sourceDocument.getFileType());
+        if (fileContent != null && !fileContent.isBlank()) {
+            file.put("content", fileContent);
+        }
+        return file;
+    }
+
+    private String extractDocumentTextFromStorage(KnowledgeItem item, Document sourceDocument) throws Exception {
+        if (sourceDocument == null || !StringUtils.hasText(sourceDocument.getMinioPath())) {
+            return null;
+        }
+
+        KnowledgeBase knowledgeBase = knowledgeBaseMapper.findById(item.getKbId()).orElse(null);
+        String bucketName = resolveBucketName(knowledgeBase);
+
+        sourceDocument.setExtractStatus(1);
+        documentMapper.save(sourceDocument);
+
+        try (GetObjectResponse response = minioClient.getObject(
+                GetObjectArgs.builder()
+                        .bucket(bucketName)
+                        .object(sourceDocument.getMinioPath())
+                        .build())) {
+            String text = tika.parseToString(response);
+            sourceDocument.setExtractText(text);
+            sourceDocument.setExtractStatus(2);
+            sourceDocument.setErrorMsg(null);
+            documentMapper.save(sourceDocument);
+            return text;
+        } catch (Exception e) {
+            sourceDocument.setExtractStatus(3);
+            sourceDocument.setErrorMsg(e.getMessage());
+            documentMapper.save(sourceDocument);
+            throw e;
+        }
+    }
+
+    private void removeMinioObject(String bucketName, String objectPath) {
+        if (!StringUtils.hasText(bucketName) || !StringUtils.hasText(objectPath)) {
+            return;
+        }
+        try {
+            minioClient.removeObject(
+                    io.minio.RemoveObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(objectPath)
+                            .build()
+            );
+        } catch (Exception e) {
+            log.warn("删除MinIO对象失败: bucket={}, object={}", bucketName, objectPath, e);
+        }
+    }
+
+    private String buildPreviewPdfPath(String minioPath) {
+        if (!StringUtils.hasText(minioPath)) {
+            return null;
+        }
+        int slashIndex = minioPath.lastIndexOf('/');
+        String dir = slashIndex >= 0 ? minioPath.substring(0, slashIndex + 1) : "";
+        String fileName = slashIndex >= 0 ? minioPath.substring(slashIndex + 1) : minioPath;
+        int dotIndex = fileName.lastIndexOf('.');
+        String baseName = dotIndex > 0 ? fileName.substring(0, dotIndex) : fileName;
+        return dir + "_preview/" + baseName + ".pdf";
+    }
+
+    private String resolveBucketName(KnowledgeBase knowledgeBase) {
+        if (knowledgeBase == null) {
+            return minioConfig.getBucketName();
+        }
+        return StringUtils.hasText(knowledgeBase.getBucketName())
+                ? knowledgeBase.getBucketName()
+                : minioConfig.getBucketName();
     }
 }

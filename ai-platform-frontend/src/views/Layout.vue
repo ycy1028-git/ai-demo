@@ -38,30 +38,30 @@
           text-color="#64748b"
           active-text-color="#fff"
         >
-          <el-menu-item index="/dashboard">
+          <el-menu-item v-if="canView('dashboard')" index="/dashboard">
             <el-icon><Odometer /></el-icon>
             <template #title>工作台</template>
           </el-menu-item>
 
-          <el-sub-menu index="/knowledge">
+          <el-sub-menu v-if="canView('knowledge.base') || canView('knowledge.item')" index="/knowledge">
             <template #title>
               <el-icon><Document /></el-icon>
               <span>智能知识库</span>
             </template>
-            <el-menu-item index="/knowledge/base">知识库列表</el-menu-item>
-            <el-menu-item index="/knowledge/item">知识列表</el-menu-item>
+            <el-menu-item v-if="canView('knowledge.base')" index="/knowledge/base">知识库列表</el-menu-item>
+            <el-menu-item v-if="canView('knowledge.item')" index="/knowledge/item">知识列表</el-menu-item>
           </el-sub-menu>
 
-          <el-sub-menu index="/app">
+          <el-sub-menu v-if="canView('app.customer') || canView('app.search')" index="/app">
             <template #title>
               <el-icon><Grid /></el-icon>
               <span>智能应用</span>
             </template>
-            <el-menu-item index="/app/customer">智能助手</el-menu-item>
-            <el-menu-item index="/app/search">智能搜索</el-menu-item>
+            <el-menu-item v-if="canView('app.customer')" index="/app/customer">智能助手</el-menu-item>
+            <el-menu-item v-if="canView('app.search')" index="/app/search">智能搜索</el-menu-item>
           </el-sub-menu>
 
-          <el-sub-menu index="/flow">
+          <el-sub-menu v-if="canView('flow.template')" index="/flow">
             <template #title>
               <el-icon><Operation /></el-icon>
               <span>流程管理</span>
@@ -69,14 +69,15 @@
             <el-menu-item index="/flow/template">流程模板</el-menu-item>
           </el-sub-menu>
 
-          <el-sub-menu index="/system">
+          <el-sub-menu v-if="canView('system.user') || canView('system.role') || canView('system.credential') || canView('system.model')" index="/system">
             <template #title>
               <el-icon><Setting /></el-icon>
               <span>系统管理</span>
             </template>
-            <el-menu-item index="/system/user">用户管理</el-menu-item>
-            <el-menu-item index="/system/credential">API凭证管理</el-menu-item>
-            <el-menu-item index="/system/model">大模型配置</el-menu-item>
+            <el-menu-item v-if="canView('system.user')" index="/system/user">用户管理</el-menu-item>
+            <el-menu-item v-if="canView('system.role')" index="/system/role">角色管理</el-menu-item>
+            <el-menu-item v-if="canView('system.credential')" index="/system/credential">API凭证管理</el-menu-item>
+            <el-menu-item v-if="canView('system.model')" index="/system/model">大模型配置</el-menu-item>
           </el-sub-menu>
         </el-menu>
       </div>
@@ -200,6 +201,10 @@ const currentRoute = computed(() => route)
 
 // 当前激活的菜单
 const activeMenu = computed(() => route.path)
+
+function canView(code) {
+  return userStore.hasPermission(code)
+}
 
 // 切换侧边栏折叠状态
 function toggleSidebar() {

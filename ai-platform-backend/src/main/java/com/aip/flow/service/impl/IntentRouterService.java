@@ -54,9 +54,6 @@ public class IntentRouterService implements IIntentRouterService {
     /** JSON 解析器 */
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    /** 置信度阈值：低于此值需要追问用户 */
-    private static final double CONFIDENCE_THRESHOLD = 0.7;
-
     private static final List<String> KNOWLEDGE_HINT_WORDS = List.of(
             "制度", "规定", "政策", "手册", "文档", "流程", "说明", "怎么", "如何", "为什么", "是什么",
             "能否", "是否", "区别", "作用", "原理", "配置", "报错", "接口", "参数", "上限", "权限"
@@ -64,6 +61,11 @@ public class IntentRouterService implements IIntentRouterService {
 
     private static final List<String> FLOW_ACTION_WORDS = List.of(
             "提交", "创建", "发起", "审批", "报销", "请假", "工单", "新增", "删除", "修改", "更新", "办理"
+    );
+
+    // 邮件发送关键词
+    private static final List<String> EMAIL_KEYWORDS = List.of(
+            "发邮件", "发送邮件", "寄邮件", "邮件", "邮箱地址", "@"
     );
 
     /**
@@ -81,15 +83,7 @@ public class IntentRouterService implements IIntentRouterService {
     @Override
     public IntentRouteResult route(String userMessage, com.aip.flow.engine.FlowContext context) {
         try {
-            // ========== 1. 快速匹配（关键词匹配） ==========
-            // 优点：无需调用 LLM，成本低、速度快
-            String quickMatch = quickMatchTemplate(userMessage);
-            if (quickMatch != null) {
-                log.info("快速匹配到模板: {}", quickMatch);
-                return buildFixedTemplateResult(quickMatch);
-            }
-
-            // ========== 2. LLM 意图分析 ==========
+            // ========== 1. LLM 意图分析（优先） ==========
             // 获取所有启用的模板
             List<FlowTemplate> templates = flowTemplateMapper.findAllEnabledOrderByPriority();
             if (templates.isEmpty()) {
@@ -114,9 +108,127 @@ public class IntentRouterService implements IIntentRouterService {
 
         } catch (Exception e) {
             log.error("意图路由异常: error={}", e.getMessage(), e);
-            // 异常时使用兜底方案
+            // 异常时降级到快速匹配，再兜底
+            String quickMatch = quickMatchTemplate(userMessage);
+            if (quickMatch != null) {
+                return buildFixedTemplateResult(quickMatch);
+            }
             return buildFallbackResult();
         }
+    }
+
+    /**
+     * 邮件快速路由检查
+     * 检测用户消息是否包含邮件发送意图，并尝试提取参数
+     */
+    private IntentRouteResult checkEmailRoute(String userMessage, com.aip.flow.engine.FlowContext context) {
+        // 检查是否包含邮件关键词
+        boolean hasEmailIntent = EMAIL_KEYWORDS.stream()
+                .anyMatch(keyword -> userMessage.toLowerCase().contains(keyword.toLowerCase()));
+        
+        // 检查是否包含邮箱地址
+        boolean hasEmailAddress = userMessage.matches(".*[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}.*");
+        
+        if (!hasEmailIntent && !hasEmailAddress) {
+            return null;
+        }
+        
+        log.info("检测到邮件意图: hasEmailIntent={}, hasEmailAddress={}", hasEmailIntent, hasEmailAddress);
+        
+        // 提取邮箱地址
+        String email = extractEmailFromText(userMessage);
+        String subject = extractSubjectFromText(userMessage);
+        String content = extractContentFromText(userMessage);
+        
+        // 构建结果：返回动态规划，但标记需要使用 email_send 节点
+        Map<String, Object> params = new HashMap<>();
+        if (email != null) {
+            params.put("to", email);
+        }
+        if (subject != null) {
+            params.put("subject", subject);
+        }
+        if (content != null) {
+            params.put("content", content);
+        }
+        
+        // 判断是否需要继续收集参数
+        boolean needMoreInput = email == null || subject == null || content == null;
+        String prompt = null;
+        if (needMoreInput) {
+            if (email == null) {
+                prompt = "请问您希望将邮件发送到哪个邮箱地址？";
+            } else if (subject == null) {
+                prompt = "请告诉我邮件的主题是什么？";
+            } else if (content == null) {
+                prompt = "请告诉我邮件的内容是什么？";
+            }
+        }
+        
+        return IntentRouteResult.builder()
+                .routeType(IntentRouteResult.RouteType.DYNAMIC_PLAN)
+                .intent("发送邮件")
+                .params(params)
+                .confidence(0.9)
+                .needMoreInput(needMoreInput)
+                .prompt(prompt)
+                .routeReason("检测到邮件发送意图")
+                .build();
+    }
+
+    /**
+     * 从文本中提取邮箱地址
+     */
+    private String extractEmailFromText(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})");
+        java.util.regex.Matcher matcher = pattern.matcher(text);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return null;
+    }
+
+    /**
+     * 从文本中提取邮件主题
+     */
+    private String extractSubjectFromText(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        String[] patterns = {
+            "主题[是为：:]\\s*(.+?)(?:，|,|。|$)",
+            "标题[是为：:]\\s*(.+?)(?:，|,|。|$)"
+        };
+        for (String pattern : patterns) {
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile(pattern, java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
+            if (m.find()) {
+                return m.group(1).trim();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 从文本中提取邮件内容
+     */
+    private String extractContentFromText(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        String[] patterns = {
+            "内容[是为：:]\\s*(.+?)(?:，|,|。|$)",
+            "说[是为：:]\\s*(.+?)(?:，|,|。|$)"
+        };
+        for (String pattern : patterns) {
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile(pattern, java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
+            if (m.find()) {
+                return m.group(1).trim();
+            }
+        }
+        return null;
     }
 
     /**
@@ -253,6 +365,8 @@ public class IntentRouterService implements IIntentRouterService {
               "intent": "费用报销",
               "confidence": 0.95,
               "params": {"amount": 1000},
+              "nextAction": null,
+              "requiresKnowledgeRetrieval": false,
               "prompt": null
             }
 
@@ -265,6 +379,8 @@ public class IntentRouterService implements IIntentRouterService {
             注意事项：
             - 优先匹配固定模板（高优先级）
             - 复杂业务场景使用固定模板
+            - 若识别为“内部知识查询/制度问答”，设置 requiresKnowledgeRetrieval=true，routeType=DIRECT_ANSWER
+            - 若识别为“内部节点能力调用”（如 email_send 等），设置 routeType=DYNAMIC_PLAN 且 nextAction 为节点类型
             - confidence 低于 0.7 时返回 prompt 追问用户
             """);
 
@@ -352,13 +468,18 @@ public class IntentRouterService implements IIntentRouterService {
                     .params(params)
                     .confidence(confidence)
                     .prompt(prompt)
-                    // 置信度低于阈值时，需要追问用户补充信息
-                    .needMoreInput(confidence < CONFIDENCE_THRESHOLD)
-                    .requiresKnowledgeRetrieval(shouldRetrieveKnowledge(routeType,
-                            jsonNode.has("intent") ? jsonNode.get("intent").asText() : null,
-                            jsonNode.has("routeReason") && !jsonNode.get("routeReason").isNull()
-                                    ? jsonNode.get("routeReason").asText()
-                                    : userMessage))
+                    .nextAction(jsonNode.has("nextAction") && !jsonNode.get("nextAction").isNull()
+                            ? jsonNode.get("nextAction").asText()
+                            : null)
+                    // 仅当模型明确给出追问内容时，才进入等待输入
+                    .needMoreInput(prompt != null && !prompt.isBlank())
+                    .requiresKnowledgeRetrieval(jsonNode.has("requiresKnowledgeRetrieval")
+                            ? jsonNode.get("requiresKnowledgeRetrieval").asBoolean()
+                            : shouldRetrieveKnowledge(routeType,
+                                    jsonNode.has("intent") ? jsonNode.get("intent").asText() : null,
+                                    jsonNode.has("routeReason") && !jsonNode.get("routeReason").isNull()
+                                            ? jsonNode.get("routeReason").asText()
+                                            : userMessage))
                     .routeReason(jsonNode.has("routeReason") && !jsonNode.get("routeReason").isNull()
                             ? jsonNode.get("routeReason").asText()
                             : "基于语义规则自动判定")
@@ -367,7 +488,7 @@ public class IntentRouterService implements IIntentRouterService {
             log.info("路由结果: routeType={}, templateCode={}, confidence={}",
                     routeType, templateCode, confidence);
 
-            return result;
+            return applySemanticGuard(result, userMessage);
 
         } catch (Exception e) {
             log.error("解析路由结果失败: {}", e.getMessage());
@@ -440,5 +561,78 @@ public class IntentRouterService implements IIntentRouterService {
         if (node.isBoolean()) return node.asBoolean();
         if (node.isNull()) return null;
         return node.toString();
+    }
+
+    private IntentRouteResult applySemanticGuard(IntentRouteResult result, String userMessage) {
+        if (result == null) {
+            return null;
+        }
+
+        boolean emailIntent = isEmailIntent(userMessage, result.getIntent(), result.getRouteReason(), result.getNextAction());
+        if (!emailIntent) {
+            return result;
+        }
+
+        if (result.getRouteType() == IntentRouteResult.RouteType.DIRECT_ANSWER
+                || result.getRouteType() == IntentRouteResult.RouteType.FALLBACK) {
+            result.setRouteType(IntentRouteResult.RouteType.DYNAMIC_PLAN);
+        }
+
+        if (result.getNextAction() == null || result.getNextAction().isBlank()) {
+            result.setNextAction("email_send");
+        }
+
+        if (result.getParams() == null) {
+            result.setParams(new HashMap<>());
+        }
+
+        if (!result.getParams().containsKey("to")) {
+            String email = extractEmailFromText(userMessage);
+            if (email != null) {
+                result.getParams().put("to", email);
+            }
+        }
+        if (!result.getParams().containsKey("subject")) {
+            String subject = extractSubjectFromText(userMessage);
+            if (subject != null) {
+                result.getParams().put("subject", subject);
+            }
+        }
+        if (!result.getParams().containsKey("content")) {
+            String content = extractContentFromText(userMessage);
+            if (content != null) {
+                result.getParams().put("content", content);
+            }
+        }
+
+        // 由节点负责逐步追问参数，避免路由层进入无提示 waiting
+        result.setNeedMoreInput(false);
+        result.setPrompt(null);
+        result.setRequiresKnowledgeRetrieval(false);
+
+        String reason = result.getRouteReason();
+        if (reason == null || reason.isBlank()) {
+            result.setRouteReason("语义护栏: 邮件操作");
+        }
+
+        return result;
+    }
+
+    private boolean isEmailIntent(String userMessage, String intent, String reason, String nextAction) {
+        if (nextAction != null && nextAction.toLowerCase().contains("email")) {
+            return true;
+        }
+
+        String merged = ((userMessage == null ? "" : userMessage) + " "
+                + (intent == null ? "" : intent) + " "
+                + (reason == null ? "" : reason)).toLowerCase();
+
+        for (String keyword : EMAIL_KEYWORDS) {
+            if (merged.contains(keyword.toLowerCase())) {
+                return true;
+            }
+        }
+
+        return merged.contains("@");
     }
 }

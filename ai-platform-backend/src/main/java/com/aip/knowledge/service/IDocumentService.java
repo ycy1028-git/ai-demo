@@ -71,6 +71,14 @@ public interface IDocumentService {
     String getDownloadUrl(String id);
 
     /**
+     * 获取文档预览URL
+     *
+     * @param id 文档ID（UUIDv7 无横杠字符串）
+     * @return 预览URL
+     */
+    String getPreviewUrl(String id);
+
+    /**
      * 批量提取文档文本
      *
      * @param kbId 知识库ID（UUIDv7 无横杠字符串）

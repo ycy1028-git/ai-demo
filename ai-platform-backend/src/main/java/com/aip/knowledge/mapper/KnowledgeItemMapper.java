@@ -42,6 +42,12 @@ public interface KnowledgeItemMapper extends JpaRepository<KnowledgeItem, String
     List<KnowledgeItem> findBySourceDocId(@Param("sourceDocId") String sourceDocId);
 
     /**
+     * 统计引用某文档的有效知识条目数量
+     */
+    @Query("SELECT COUNT(k) FROM KnowledgeItem k WHERE k.sourceDocId = :sourceDocId AND k.deleted = false")
+    long countActiveBySourceDocId(@Param("sourceDocId") String sourceDocId);
+
+    /**
      * 根据标题查询
      */
     Optional<KnowledgeItem> findByTitle(String title);

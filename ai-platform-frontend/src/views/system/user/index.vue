@@ -23,12 +23,12 @@
       >
         <el-table-column type="selection" width="55" />
         <el-table-column prop="username" label="用户名" width="150" />
-        <el-table-column prop="nickname" label="昵称" width="150" />
+        <el-table-column prop="realName" label="姓名" width="150" />
         <el-table-column prop="email" label="邮箱" width="200" />
         <el-table-column prop="phone" label="手机号" width="130" />
-        <el-table-column prop="roleName" label="角色" width="120" align="center">
+        <el-table-column prop="roleName" label="角色" width="140" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.roleName === '超级管理员' ? 'danger' : 'primary'">
+            <el-tag :type="row.roleName === '系统管理员' ? 'danger' : 'primary'">
               {{ row.roleName }}
             </el-tag>
           </template>
@@ -42,7 +42,7 @@
         </el-table-column>
         <el-table-column prop="lastLoginTime" label="最后登录" width="180" />
         <el-table-column prop="createTime" label="创建时间" width="180" />
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link @click="handleEdit(row)">编辑</el-button>
             <el-button type="primary" link @click="handleResetPwd(row)">重置密码</el-button>
@@ -80,8 +80,8 @@
         <el-form-item label="用户名" prop="username">
           <el-input v-model="form.username" placeholder="请输入用户名" :disabled="isEdit" />
         </el-form-item>
-        <el-form-item label="昵称" prop="nickname">
-          <el-input v-model="form.nickname" placeholder="请输入昵称" />
+        <el-form-item label="姓名" prop="realName">
+          <el-input v-model="form.realName" placeholder="请输入姓名" />
         </el-form-item>
         <el-form-item label="邮箱" prop="email">
           <el-input v-model="form.email" placeholder="请输入邮箱" />
@@ -90,10 +90,13 @@
           <el-input v-model="form.phone" placeholder="请输入手机号" />
         </el-form-item>
         <el-form-item label="角色" prop="roleId">
-          <el-select v-model="form.roleId" placeholder="请选择角色">
-            <el-option label="超级管理员" :value="1" />
-            <el-option label="普通管理员" :value="2" />
-            <el-option label="普通用户" :value="3" />
+          <el-select v-model="form.roleId" placeholder="请选择角色" style="width: 100%">
+            <el-option
+              v-for="role in roleOptions"
+              :key="role.id"
+              :label="role.name"
+              :value="role.id"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="状态" prop="status">
@@ -116,13 +119,14 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import SearchBar from '@/components/SearchBar.vue'
-import { getUserList, createUser, updateUser, deleteUser } from '@/api/user'
+import { getAllRoles, getUserList, createUser, updateUser, deleteUser, resetUserPassword } from '@/api/user'
 
 const loading = ref(false)
 const submitting = ref(false)
 const dialogVisible = ref(false)
 const formRef = ref(null)
 const isEdit = ref(false)
+const roleOptions = ref([])
 
 const searchFields = [
   { prop: 'username', label: '用户名', type: 'input', placeholder: '请输入用户名' },
@@ -150,32 +154,43 @@ const dialogTitle = computed(() => isEdit.value ? '编辑用户' : '新建用户
 
 const form = reactive({
   username: '',
-  nickname: '',
+  realName: '',
   email: '',
   phone: '',
   roleId: '',
-  status: 1
+  status: 1,
+  password: ''
 })
 
 const rules = {
   username: [
     { required: true, message: '请输入用户名', trigger: 'blur' }
   ],
+  realName: [
+    { required: true, message: '请输入姓名', trigger: 'blur' }
+  ],
   email: [
     { required: true, message: '请输入邮箱', trigger: 'blur' },
     { type: 'email', message: '请输入正确的邮箱格式', trigger: 'blur' }
+  ],
+  roleId: [
+    { required: true, message: '请选择角色', trigger: 'change' }
   ]
 }
 
-// 角色映射
-const roleMap = {
-  1: { name: '超级管理员', type: 'danger' },
-  2: { name: '普通管理员', type: 'primary' },
-  3: { name: '普通用户', type: 'primary' }
-}
+const roleNameMap = computed(() => {
+  const map = {}
+  roleOptions.value.forEach(role => {
+    map[role.id] = role.name
+  })
+  return map
+})
 
-function getRoleInfo(roleId) {
-  return roleMap[roleId] || { name: '未知', type: 'info' }
+async function loadRoles() {
+  const res = await getAllRoles()
+  const data = res?.data || res
+  const list = Array.isArray(data) ? data : []
+  roleOptions.value = list.filter(item => item.status === 1)
 }
 
 // 获取数据
@@ -196,11 +211,11 @@ async function fetchData() {
       tableData.value = list.map(item => ({
         id: item.id,
         username: item.username,
-        nickname: item.nickname || item.realName || '',
+        realName: item.realName || item.nickname || '',
         email: item.email || '',
         phone: item.phone || '',
-        roleId: item.roleId || item.role_id || 3,
-        roleName: getRoleInfo(item.roleId || item.role_id || 3).name,
+        roleId: item.roleId || item.role_id || '',
+        roleName: roleNameMap.value[item.roleId || item.role_id] || '未配置',
         status: item.status,
         lastLoginTime: formatDateTime(item.lastLoginTime || item.last_login_time || null),
         createTime: formatDateTime(item.createdAt || item.createTime || item.create_time)
@@ -244,13 +259,31 @@ function handleReset() {
 
 function handleCreate() {
   isEdit.value = false
-  Object.assign(form, { id: null, username: '', nickname: '', email: '', phone: '', status: 1 })
+  Object.assign(form, {
+    id: null,
+    username: '',
+    realName: '',
+    email: '',
+    phone: '',
+    roleId: roleOptions.value[0]?.id || '',
+    status: 1,
+    password: '123456'
+  })
   dialogVisible.value = true
 }
 
 function handleEdit(row) {
   isEdit.value = true
-  Object.assign(form, { id: row.id, username: row.username, nickname: row.nickname, email: row.email, phone: row.phone, status: row.status })
+  Object.assign(form, {
+    id: row.id,
+    username: row.username,
+    realName: row.realName,
+    email: row.email,
+    phone: row.phone,
+    roleId: row.roleId,
+    status: row.status,
+    password: ''
+  })
   dialogVisible.value = true
 }
 
@@ -261,10 +294,25 @@ async function handleSubmit() {
     submitting.value = true
     try {
       if (isEdit.value) {
-        await updateUser(form.id, form)
+        await updateUser(form.id, {
+          username: form.username,
+          realName: form.realName,
+          email: form.email,
+          phone: form.phone,
+          roleId: form.roleId,
+          status: form.status
+        })
         ElMessage.success('保存成功')
       } else {
-        await createUser(form)
+        await createUser({
+          username: form.username,
+          realName: form.realName,
+          email: form.email,
+          phone: form.phone,
+          roleId: form.roleId,
+          status: form.status,
+          password: form.password || '123456'
+        })
         ElMessage.success('创建成功')
       }
       dialogVisible.value = false
@@ -280,12 +328,20 @@ async function handleSubmit() {
 
 async function handleResetPwd(row) {
   try {
-    await ElMessageBox.confirm(`确定要重置用户「${row.username}」的密码吗？`, '提示', {
+    const { value } = await ElMessageBox.prompt('请输入新密码（至少6位）', `重置密码：${row.username}`, {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputType: 'password',
+      inputPattern: /^.{6,}$/,
+      inputErrorMessage: '密码至少6位'
+    })
+    await ElMessageBox.confirm(`确认将用户「${row.username}」密码重置为你输入的新密码吗？`, '提示', {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
       type: 'warning'
     })
-    ElMessage.info('密码重置功能待后端实现')
+    await resetUserPassword(row.id, value)
+    ElMessage.success('密码重置成功')
   } catch (error) {
     // 用户取消
   }
@@ -317,7 +373,7 @@ function handleCurrentChange(page) {
 }
 
 onMounted(() => {
-  fetchData()
+  loadRoles().then(fetchData)
 })
 </script>
 
