@@ -69,6 +69,10 @@ public class DynamicPlannerService implements IDynamicPlannerService {
         try {
             log.info("开始动态规划: userMessage={}", userMessage);
 
+            if (isEmailIntent(userMessage, context)) {
+                return buildEmailPlan();
+            }
+
             // ========== 1. 构建规划提示词 ==========
             String prompt = buildPlanningPrompt(userMessage, context);
 
@@ -296,6 +300,38 @@ public class DynamicPlannerService implements IDynamicPlannerService {
                                 .order(2)
                                 .reason("生成回答")
                                 .required(true)   // 必需，必须有回答
+                                .build()
+                ))
+                .build();
+    }
+
+    private boolean isEmailIntent(String userMessage, FlowContext context) {
+        String normalized = userMessage == null ? "" : userMessage.toLowerCase();
+        boolean keywordMatched = normalized.contains("发邮件")
+                || normalized.contains("发送邮件")
+                || normalized.contains("邮件")
+                || normalized.contains("邮箱");
+
+        Object lastNodeType = context != null ? context.getMetadata("last_node_type") : null;
+        boolean waitingEmailFollowUp = context != null
+                && "waiting".equalsIgnoreCase(context.getStatus())
+                && "email_send".equals(String.valueOf(lastNodeType));
+
+        return keywordMatched || waitingEmailFollowUp;
+    }
+
+    private NodeExecutionPlan buildEmailPlan() {
+        return NodeExecutionPlan.builder()
+                .planId("email_" + System.currentTimeMillis())
+                .strategy("eager")
+                .reason("检测到邮件发送意图，优先执行邮件节点并按需追问参数")
+                .confidence(0.95)
+                .nodes(List.of(
+                        PlannedNode.builder()
+                                .nodeType("email_send")
+                                .order(1)
+                                .reason("收集并发送邮件")
+                                .required(true)
                                 .build()
                 ))
                 .build();

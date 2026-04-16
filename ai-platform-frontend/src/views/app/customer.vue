@@ -9,7 +9,7 @@
             <h2>智能助手</h2>
           </div>
           <div class="toolbar-right">
-            <el-button @click="clearChat" :disabled="messages.length === 0">
+            <el-button @click="clearChat" :loading="clearingContext">
               <el-icon><Delete /></el-icon>
               清空
             </el-button>
@@ -250,6 +250,7 @@ const isGenerating = ref(false)
 const messages = ref([])
 const messagesRef = ref(null)
 const sessionId = ref(createSessionId())
+const clearingContext = ref(false)
 let abortController = null
 let messageIdSeed = 0
 const isComposing = ref(false)
@@ -290,18 +291,47 @@ const dialogWidth = computed(() => {
   return window.innerWidth > 1200 ? '800px' : '90%'
 })
 
+async function clearServerContext(currentSessionId) {
+  if (!currentSessionId) {
+    return
+  }
+
+  await request.delete('/flow/chat/context', {
+    params: { sessionId: currentSessionId }
+  })
+}
+
 // 刷新会话
-function refreshSession() {
+async function refreshSession() {
   stopGeneration({ silent: true })
+  const oldSessionId = sessionId.value
+  try {
+    await clearServerContext(oldSessionId)
+  } catch (error) {
+    console.warn('清理旧会话上下文失败:', error)
+  }
   messages.value = []
   sessionId.value = createSessionId()
 }
 
 // 清空对话
-function clearChat() {
+async function clearChat() {
+  if (clearingContext.value) return
   stopGeneration({ silent: true })
-  messages.value = []
-  sessionId.value = createSessionId()
+
+  const currentSessionId = sessionId.value
+  clearingContext.value = true
+  try {
+    await clearServerContext(currentSessionId)
+    messages.value = []
+    sessionId.value = createSessionId()
+    ElMessage.success('已清空对话上下文')
+  } catch (error) {
+    console.error('清空上下文失败:', error)
+    ElMessage.error(error?.message || '清空上下文失败，请稍后重试')
+  } finally {
+    clearingContext.value = false
+  }
 }
 
 // 滚动到底部

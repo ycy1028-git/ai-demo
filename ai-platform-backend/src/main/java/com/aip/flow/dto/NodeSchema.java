@@ -26,5 +26,6 @@ public class NodeSchema {
         private boolean required;
         private Object defaultValue;
         private java.util.List<String> enumValues; // 枚举值
+        private Property items; // 数组类型的元素定义
     }
 }

@@ -104,6 +104,13 @@ public class MailService {
      * 发送带附件的邮件（多人）
      */
     public boolean sendAttachmentMail(List<String> toList, String subject, String content, String[] attachmentPaths) {
+        return sendAttachmentMail(toList, null, subject, content, attachmentPaths);
+    }
+
+    /**
+     * 发送带抄送和附件的邮件
+     */
+    public boolean sendAttachmentMail(List<String> toList, List<String> ccList, String subject, String content, String[] attachmentPaths) {
         if (fromAddress == null || fromAddress.isBlank()) {
             log.warn("邮件发送失败：发件人地址未配置");
             return false;
@@ -114,9 +121,16 @@ public class MailService {
             MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, defaultEncoding);
             helper.setFrom(fromAddress);
             helper.setTo(toList.toArray(new String[0]));
+            
+            // 设置抄送地址
+            if (ccList != null && !ccList.isEmpty()) {
+                helper.setCc(ccList.toArray(new String[0]));
+            }
+            
             helper.setSubject(subject);
             helper.setText(content);
 
+            // 添加附件
             if (attachmentPaths != null) {
                 for (String path : attachmentPaths) {
                     if (path != null && !path.isBlank()) {
@@ -127,13 +141,80 @@ public class MailService {
             }
 
             mailSender.send(mimeMessage);
-            log.info("附件邮件发送成功: to={}, subject={}, attachments={}", toList, subject, attachmentPaths);
+            log.info("附件邮件发送成功: to={}, cc={}, subject={}, attachments={}", 
+                    toList, ccList, subject, attachmentPaths);
             return true;
         } catch (MessagingException e) {
             log.error("附件邮件构建失败: to={}, error={}", toList, e.getMessage(), e);
             return false;
         } catch (Exception e) {
             log.error("附件邮件发送失败: to={}, error={}", toList, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * 发送带抄送的邮件
+     */
+    public boolean sendCcMail(List<String> toList, List<String> ccList, String subject, String content) {
+        if (fromAddress == null || fromAddress.isBlank()) {
+            log.warn("邮件发送失败：发件人地址未配置");
+            return false;
+        }
+
+        try {
+            SimpleMailMessage message = new SimpleMailMessage();
+            message.setFrom(fromAddress);
+            message.setTo(toList.toArray(new String[0]));
+            
+            // 设置抄送地址
+            if (ccList != null && !ccList.isEmpty()) {
+                message.setCc(ccList.toArray(new String[0]));
+            }
+            
+            message.setSubject(subject);
+            message.setText(content);
+
+            mailSender.send(message);
+            log.info("抄送邮件发送成功: to={}, cc={}, subject={}", toList, ccList, subject);
+            return true;
+        } catch (Exception e) {
+            log.error("抄送邮件发送失败: to={}, error={}", toList, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * 发送带抄送的HTML邮件
+     */
+    public boolean sendCcHtmlMail(List<String> toList, List<String> ccList, String subject, String htmlContent) {
+        if (fromAddress == null || fromAddress.isBlank()) {
+            log.warn("邮件发送失败：发件人地址未配置");
+            return false;
+        }
+
+        try {
+            MimeMessage mimeMessage = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, defaultEncoding);
+            helper.setFrom(fromAddress);
+            helper.setTo(toList.toArray(new String[0]));
+            
+            // 设置抄送地址
+            if (ccList != null && !ccList.isEmpty()) {
+                helper.setCc(ccList.toArray(new String[0]));
+            }
+            
+            helper.setSubject(subject);
+            helper.setText(htmlContent, true);
+
+            mailSender.send(mimeMessage);
+            log.info("抄送HTML邮件发送成功: to={}, cc={}, subject={}", toList, ccList, subject);
+            return true;
+        } catch (MessagingException e) {
+            log.error("抄送HTML邮件构建失败: to={}, error={}", toList, e.getMessage(), e);
+            return false;
+        } catch (Exception e) {
+            log.error("抄送HTML邮件发送失败: to={}, error={}", toList, e.getMessage(), e);
             return false;
         }
     }
