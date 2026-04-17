@@ -224,8 +224,12 @@ public class EmailSendExecutor extends BaseNodeExecutor {
             return;
         }
 
+        @SuppressWarnings("unchecked")
+        List<String> missingParams = (List<String>) context.getMetadata(META_MISSING_PARAMS);
         boolean waitingForEmail = "waiting".equalsIgnoreCase(context.getStatus())
-                || "email_send".equals(String.valueOf(context.getMetadata("last_node_type")));
+                && "email_send".equals(String.valueOf(context.getMetadata("last_node_type")))
+                && missingParams != null
+                && !missingParams.isEmpty();
         if (!waitingForEmail) {
             return;
         }
@@ -235,66 +239,45 @@ public class EmailSendExecutor extends BaseNodeExecutor {
             return;
         }
 
-        // 处理等待状态下的参数填充
-        @SuppressWarnings("unchecked")
-        List<String> missingParams = (List<String>) context.getMetadata(META_MISSING_PARAMS);
-        if (missingParams != null) {
-            String expectedParam = missingParams.stream()
-                    .filter(param -> params.get(param) == null || (params.get(param) instanceof String s && s.trim().isEmpty()))
-                    .findFirst()
-                    .orElse(null);
-            if (expectedParam != null) {
-                if (PARAM_TO.equals(expectedParam)) {
-                    String extractedEmail = extractEmailFromText(normalized);
-                    if (extractedEmail != null) {
-                        params.put(PARAM_TO, extractedEmail);
-                    }
-                }
-
-                if (PARAM_SUBJECT.equals(expectedParam) && params.get(PARAM_SUBJECT) == null) {
-                    params.put(PARAM_SUBJECT, normalized);
-                }
-
-                if (PARAM_CONTENT.equals(expectedParam) && params.get(PARAM_CONTENT) == null) {
-                    params.put(PARAM_CONTENT, normalized);
-                }
-
-                if (PARAM_CC.equals(expectedParam) && params.get(PARAM_CC) == null) {
-                    List<String> ccEmails = extractEmailsFromText(normalized);
-                    if (!ccEmails.isEmpty()) {
-                        params.put(PARAM_CC, ccEmails);
-                    }
-                }
-
-                if (PARAM_ATTACHMENTS.equals(expectedParam) && params.get(PARAM_ATTACHMENTS) == null) {
-                    List<String> attachmentPaths = extractAttachmentPaths(normalized);
-                    if (!attachmentPaths.isEmpty()) {
-                        params.put(PARAM_ATTACHMENTS, attachmentPaths);
-                    }
-                }
-
-                context.getMetadata().put(META_MISSING_PARAMS, getMissingRequiredParams(params));
-                return;
-            }
-        }
-        
-        // 兼容原有的填充逻辑
-        if (params.get(PARAM_TO) == null) {
-            String extractedEmail = extractEmailFromText(normalized);
-            if (extractedEmail != null) {
-                params.put(PARAM_TO, extractedEmail);
-                return;
-            }
-        }
-
-        if (params.get(PARAM_SUBJECT) == null) {
-            params.put(PARAM_SUBJECT, normalized);
+        // 只按当前缺失参数定向填充，避免把邮箱或整句误写为主题
+        String expectedParam = missingParams.stream()
+                .filter(param -> params.get(param) == null || (params.get(param) instanceof String s && s.trim().isEmpty()))
+                .findFirst()
+                .orElse(null);
+        if (expectedParam == null) {
             return;
         }
 
-        if (params.get(PARAM_CONTENT) == null) {
+        if (PARAM_TO.equals(expectedParam)) {
+            String extractedEmail = extractEmailFromText(normalized);
+            if (extractedEmail != null) {
+                params.put(PARAM_TO, extractedEmail);
+            }
+        }
+
+        if (PARAM_SUBJECT.equals(expectedParam) && params.get(PARAM_SUBJECT) == null) {
+            params.put(PARAM_SUBJECT, normalized);
+        }
+
+        if (PARAM_CONTENT.equals(expectedParam) && params.get(PARAM_CONTENT) == null) {
             params.put(PARAM_CONTENT, normalized);
         }
+
+        if (PARAM_CC.equals(expectedParam) && params.get(PARAM_CC) == null) {
+            List<String> ccEmails = extractEmailsFromText(normalized);
+            if (!ccEmails.isEmpty()) {
+                params.put(PARAM_CC, ccEmails);
+            }
+        }
+
+        if (PARAM_ATTACHMENTS.equals(expectedParam) && params.get(PARAM_ATTACHMENTS) == null) {
+            List<String> attachmentPaths = extractAttachmentPaths(normalized);
+            if (!attachmentPaths.isEmpty()) {
+                params.put(PARAM_ATTACHMENTS, attachmentPaths);
+            }
+        }
+
+        context.getMetadata().put(META_MISSING_PARAMS, getMissingRequiredParams(params));
     }
 
     /**
