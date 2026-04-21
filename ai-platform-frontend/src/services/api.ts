@@ -1,7 +1,7 @@
 /**
  * 统一请求服务
  */
-import request from '@/utils/request'
+import request from '@/api/request'
 
 /** API 响应类型 */
 export interface ApiResponse<T = any> {

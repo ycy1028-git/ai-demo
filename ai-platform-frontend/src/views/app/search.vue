@@ -304,7 +304,7 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { Search, Document, Clock, ArrowRight, View, Files, Connection, MagicStick, Check, CopyDocument } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import request from '@/utils/request'
+import request from '@/api/request'
 
 // 状态
 const searchQuery = ref('')
@@ -349,8 +349,8 @@ const dialogWidth = computed(() => {
 async function loadKnowledgeBases() {
   try {
     const res = await request.get('/knowledge/bases')
-    if (res.data.code === 200) {
-      knowledgeBases.value = res.data.data || []
+    if (res.code === 200) {
+      knowledgeBases.value = res.data || []
     }
   } catch (error) {
     console.error('加载知识库失败:', error)
@@ -382,8 +382,8 @@ async function handleSearch() {
 
     searchTime.value = Date.now() - startTime
 
-    if (res.data.code === 200) {
-      const data = res.data.data
+    if (res.code === 200) {
+      const data = res.data
       searchResult.records = data.records || []
       searchResult.total = data.total || 0
       searchResult.page = data.page || 1
@@ -416,8 +416,8 @@ async function handlePageChange(page) {
       ...(selectedKbId.value && selectedKbId.value !== ALL_KB_ID ? { kbId: selectedKbId.value } : {})
     })
 
-    if (res.data.code === 200) {
-      const data = res.data.data
+    if (res.code === 200) {
+      const data = res.data
       searchResult.records = data.records || []
       searchResult.total = data.total || 0
       searchResult.page = data.page || page
@@ -444,8 +444,8 @@ function handleKbChange() {
 async function viewDetail(item) {
   try {
     const res = await request.get(`/knowledge/detail/${item.id}`)
-    if (res.data.code === 200) {
-      currentDetail.value = res.data.data
+    if (res.code === 200) {
+      currentDetail.value = res.data
       detailDrawerVisible.value = true
     }
   } catch (error) {
@@ -463,8 +463,8 @@ async function previewDocument(item) {
 
   try {
     const res = await request.get(`/knowledge/document/preview/${item.sourceDocId}`)
-    if (res.data.code === 200) {
-      previewUrl.value = res.data.data
+    if (res.code === 200) {
+      previewUrl.value = res.data
       previewDialogVisible.value = true
     }
   } catch (error) {

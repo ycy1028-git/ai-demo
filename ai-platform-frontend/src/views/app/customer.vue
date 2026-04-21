@@ -241,7 +241,7 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { handleAuthError } from '@/api/request'
-import request from '@/utils/request'
+import request from '@/api/request'
 
 // 状态
 const inputMessage = ref('')
@@ -620,9 +620,9 @@ function formatTime(timeStr) {
 async function viewCitation(cite) {
   try {
     const res = await request.get(`/knowledge/detail/${cite.id}`)
-    if (res.data.code === 200) {
+    if (res.code === 200) {
       currentCitation.value = {
-        ...res.data.data,
+        ...res.data,
         kbName: cite.kbName,
         title: cite.title
       }
@@ -643,8 +643,8 @@ async function previewDocument(item) {
 
   try {
     const res = await request.get(`/knowledge/document/preview/${item.sourceDocId}`)
-    if (res.data.code === 200) {
-      previewUrl.value = res.data.data
+    if (res.code === 200) {
+      previewUrl.value = res.data
       previewDialogVisible.value = true
     }
   } catch (error) {

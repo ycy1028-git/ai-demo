@@ -39,7 +39,7 @@
 ### 1. 启动中间件（Docker）
 
 ```bash
-cd docker
+cd scripts/docker
 docker-compose up -d
 ```
 
@@ -67,7 +67,7 @@ npm run dev
 
 ### 4. 访问系统
 
-- 前端页面：http://localhost:5173
+- 前端页面：http://localhost:3000
 - 后端API：http://localhost:8080
 - 默认账号：admin / admin123
 
@@ -92,14 +92,11 @@ ai-demo/
 │   │   └── store/           # 状态管理
 │   └── package.json
 │
-├── docker/                  # Docker配置
-│   ├── docker-compose.yml   # 容器编排
-│   ├── nginx.conf          # Nginx配置
-│   └── .env                # 环境变量
-│
 └── scripts/                # 启动脚本
+    ├── docker/             # Docker配置
+    │   └── docker-compose.yml
     ├── start-dev.sh        # 开发环境启动
-    └── stop.sh             # 停止服务
+    └── stop-app.sh         # 停止后端
 ```
 
 ## API接口
@@ -118,8 +115,8 @@ ai-demo/
 - `POST /api/kb/document/upload` - 文档上传
 
 ### 智能应用
-- `GET /api/app/assistant` - 助手列表
-- `POST /api/app/chat` - 对话接口
+- `GET /api/app/chat/stream` - 助手流式对话
+- `GET /api/flow/chat/stream` - Flow流式对话
 
 ## 配置说明
 
@@ -153,7 +150,7 @@ minio:
 ### Docker Compose 一键部署
 
 ```bash
-cd docker
+cd scripts/docker
 docker-compose up -d
 ```
 

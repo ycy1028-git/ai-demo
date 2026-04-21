@@ -68,10 +68,10 @@ spring:
 
   # QQ 邮箱 SMTP 配置
   mail:
-    host: smtp.qq.com
-    port: 587
-    username: 1102127861@qq.com
-    password: gafzeqxbtavrhdfg
+    host: ${MAIL_HOST:smtp.qq.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
     properties:
       mail:
         smtp:
